@@ -80,7 +80,13 @@ struct AppModelTests {
     model.copy()
     #expect(pasteboard.string(forType: .string) == "287082")
     #expect(model.copiedID == model.selectedID)
-    model.copy(moment: .next)
+    model.showShortcuts()
+    model.setRecording(.copyNextCode)
+    #expect(model.handleKeyPress(KeyCombo(KeyCode(rawValue: 45), .command)) == true)
+    model.closeShortcuts()
+    #expect(model.handleKeyPress(KeyCombo(.return, .command)) == false)
+    #expect(pasteboard.string(forType: .string) == "287082")
+    #expect(model.handleKeyPress(KeyCombo(KeyCode(rawValue: 45), .command)) == true)
     #expect(pasteboard.string(forType: .string) == "359152")
     model.search = "sha256"
     model.copy(moment: .next)
@@ -142,7 +148,19 @@ struct AppModelTests {
       return
     }
     #expect(relaunched.filteredCodes.isEmpty)
+    relaunched.showShortcuts()
     relaunched.setVisible(true)
+    try await Task.sleep(for: .milliseconds(100))
+    guard case .locked = relaunched.phase else {
+      Issue.record("Opening the shortcut editor must not unlock")
+      return
+    }
+    relaunched.closeShortcuts()
+    try await Task.sleep(for: .milliseconds(100))
+    guard case .locked = relaunched.phase else {
+      Issue.record("Closing the shortcut editor must not unlock")
+      return
+    }
     await relaunched.unlock()
     guard case .ready(let cached) = relaunched.phase else {
       Issue.record("Expected cached codes before network sync")
@@ -239,11 +257,14 @@ struct AppModelTests {
     #expect(try store.load() == nil)
     try store.save(savedSession)
     let restored = AppModel(config: config, sessionStore: store, cacheStore: cache, contextProvider: FakeContextProvider())
+    restored.showShortcuts()
+    restored.setVisible(true)
     await restored.launch()
     guard case .locked = restored.phase else {
       Issue.record("Expected saved session to start locked")
       return
     }
+    restored.closeShortcuts()
     await restored.unlock()
     for _ in 0..<200 {
       if case .signedOut = restored.phase { break }

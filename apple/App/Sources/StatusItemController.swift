@@ -48,7 +48,12 @@ import SwiftUI
           if modifiers.isEmpty { self.optionArmed = true }
           self.model.setOptionHeld(self.optionArmed && self.panel.isKeyWindow && modifiers == .option)
         } else if event.type == .keyDown, event.window === self.panel {
-          if self.accountMenu.handleKeyEquivalent(event) { return true }
+          if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+            event.charactersIgnoringModifiers?.lowercased() == "q" {
+            NSApp.terminate(nil)
+            return true
+          }
+          if self.model.handleKeyPress(KeyCombo(event: event)) { return true }
         } else if event.type != .keyDown, event.window !== self.panel,
                   event.window !== self.statusItem.button?.window {
           self.dismissForOutsideClick()
@@ -60,7 +65,8 @@ import SwiftUI
     outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
       MainActor.assumeIsolated { self?.dismissForOutsideClick() }
     }
-    model.configureGlobalShortcut { [weak self] in self?.hotKey.setEnabled($0) }
+    model.configureGlobalShortcut { [weak self] in try self?.hotKey.register($0) }
+    model.onOpen = { [weak self] in self?.open() }
     model.onClose = { [weak self] in self?.close() }
     model.onSystemPromptFinished = { [weak self] in self?.focusPanel() }
   }
@@ -74,8 +80,10 @@ import SwiftUI
     } else { toggle() }
   }
 
-  private func toggle() {
-    if isOpen { close(); return }
+  private func toggle() { if isOpen { close() } else { open() } }
+
+  private func open() {
+    guard !isOpen else { return }
     guard let button = statusItem.button, let window = button.window else { return }
     let anchor = window.convertToScreen(button.convert(button.bounds, to: nil))
     let screen = window.screen?.visibleFrame ?? anchor

@@ -47,18 +47,20 @@ public enum LoginItemStatus: Equatable {
   private func rebuild() {
     model.refreshLoginItemStatus()
     menu.removeAllItems()
-    add("Sync Now", #selector(sync), key: "r", enabled: ready)
-    add("Lock", #selector(lock), key: "l", enabled: ready)
+    add("Sync Now", #selector(sync), shortcut: model.keymap.combo(for: .syncNow), enabled: ready)
+    add("Lock", #selector(lock), shortcut: model.keymap.combo(for: .lock), enabled: ready)
     menu.addItem(.separator())
     add("Hide Codes", #selector(hideCodes), checked: model.hideCodes)
     add("Show Suggestions", #selector(showSuggestions), checked: model.showSuggestions)
     add("Suggest Codes for Websites", #selector(websites), checked: model.websiteSuggestions)
     add(model.loginItemStatus == .requiresApproval ? "Launch at Login (Needs Approval…)" : "Launch at Login",
         #selector(login), checked: model.loginItemStatus == .enabled)
-    add("Global Shortcut ⌥⌘E", #selector(shortcut), checked: model.globalShortcutEnabled)
+    add("Keyboard Shortcuts…", #selector(shortcuts))
     menu.addItem(.separator())
     add("Sign Out", #selector(signOut), enabled: signedIn)
-    add("Quit", #selector(quit), key: "q")
+    add("Quit", #selector(quit))
+    menu.items.last?.keyEquivalent = "q"
+    menu.items.last?.keyEquivalentModifierMask = .command
   }
 
   private var ready: Bool {
@@ -74,25 +76,15 @@ public enum LoginItemStatus: Equatable {
   }
 
   private func add(
-    _ title: String, _ action: Selector, key: String = "", checked: Bool = false, enabled: Bool = true
+    _ title: String, _ action: Selector, shortcut: KeyCombo? = nil, checked: Bool = false, enabled: Bool = true
   ) {
-    let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+    let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+    item.setShortcut(shortcut, in: .current)
     item.target = self
     item.state = checked ? .on : .off
     item.isEnabled = enabled
     menu.addItem(item)
     menu.autoenablesItems = false
-  }
-
-  public func handleKeyEquivalent(_ event: NSEvent) -> Bool {
-    guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command else { return false }
-    switch event.charactersIgnoringModifiers?.lowercased() {
-    case "r": if ready { sync() }; return true
-    case "l": if ready { lock() }; return true
-    case "q": quit(); return true
-    case "\r": if ready { model.copy(moment: .next) }; return true
-    default: return false
-    }
   }
 
   @objc private func sync() { Task { await model.sync() } }
@@ -101,7 +93,7 @@ public enum LoginItemStatus: Equatable {
   @objc private func showSuggestions() { model.setShowSuggestions(!model.showSuggestions) }
   @objc private func websites() { model.setWebsiteSuggestions(!model.websiteSuggestions) }
   @objc private func login() { model.toggleLaunchAtLogin() }
-  @objc private func shortcut() { model.setGlobalShortcutEnabled(!model.globalShortcutEnabled) }
+  @objc private func shortcuts() { model.showShortcuts() }
   @objc private func signOut() { Task { await model.signOut() } }
   @objc private func quit() { NSApp.terminate(nil) }
 }

@@ -18,16 +18,13 @@ import Testing
 }
 
 @Suite @MainActor struct SettingsTests {
-  @Test func failedShortcutRegistrationShowsOffAndCloseRequestsReachTheOwner() throws {
+  @Test func closeRequestsReachTheOwner() throws {
     let suite = "u8-shortcut-\(UUID())"
     let preferences = try #require(UserDefaults(suiteName: suite))
     defer { preferences.removePersistentDomain(forName: suite) }
     let root = FileManager.default.temporaryDirectory.appending(path: suite)
     let model = AppModel(cacheStore: CacheStore(url: root.appending(path: "cache.bin")),
       contextProvider: FakeContextProvider(), preferences: preferences, loginItem: TestLoginItem())
-    model.configureGlobalShortcut { _ in "Unable to register ⌥⌘E." }
-    #expect(model.globalShortcutEnabled == false)
-    #expect(model.settingsError == "Unable to register ⌥⌘E.")
     var closed = 0
     model.onClose = { closed += 1 }
     model.requestClose()
@@ -57,17 +54,14 @@ import Testing
     original.setHideCodes(true)
     original.setWebsiteSuggestions(true)
     original.setShowSuggestions(false)
-    original.setGlobalShortcutEnabled(false)
     let restored = model("one")
     #expect(restored.hideCodes == true)
     #expect(restored.websiteSuggestions == true)
     #expect(restored.showSuggestions == false)
-    #expect(restored.globalShortcutEnabled == false)
     let other = model("two")
     #expect(other.hideCodes == false)
     #expect(other.websiteSuggestions == false)
     #expect(other.showSuggestions == true)
-    #expect(other.globalShortcutEnabled == true)
     restored.setVisible(true)
     restored.setOptionHeld(true)
     #expect(restored.codesHidden == false)
@@ -81,12 +75,10 @@ import Testing
     restored.setHideCodes(false)
     restored.setWebsiteSuggestions(false)
     restored.setShowSuggestions(true)
-    restored.setGlobalShortcutEnabled(true)
     let reset = model("one")
     #expect(reset.hideCodes == false)
     #expect(reset.websiteSuggestions == false)
     #expect(reset.showSuggestions == true)
-    #expect(reset.globalShortcutEnabled == true)
   }
 
   @Test func launchAtLoginReadsActualStatusAndOpensApprovalSettings() {

@@ -40,6 +40,11 @@ public struct VaultSession {
   public var state: VaultState
 }
 
+enum ShortcutEditor: Equatable {
+  case browsing
+  case recording(ShortcutAction, problem: ShortcutProblem?)
+}
+
 @MainActor @Observable
 public final class AppModel {
   public private(set) var phase: Phase = .launching
@@ -61,14 +66,17 @@ public final class AppModel {
   public private(set) var visible = false
   public private(set) var unlockError: String?
   public private(set) var showSuggestions: Bool
-  public private(set) var globalShortcutEnabled: Bool
+  private(set) var keymap: Keymap
+  private(set) var shortcutEditor: ShortcutEditor?
+  private(set) var unavailableGlobalShortcut: KeyCombo?
   public private(set) var settingsError: String?
+  @ObservationIgnored public var onOpen: (@MainActor () -> Void)?
   @ObservationIgnored public var onClose: (@MainActor () -> Void)?
   @ObservationIgnored public var onSystemPromptFinished: (@MainActor () -> Void)?
   public private(set) var loginItemStatus: LoginItemStatus
   public private(set) var codeSampleDate: Date
   private let loginItem: any LoginItemManaging
-  private var shortcutRegistration: ((Bool) -> String?)?
+  @ObservationIgnored private var globalRegistration: (@MainActor (KeyCombo?) throws -> Void)?
   public private(set) var hideCodes: Bool
   public private(set) var optionHeld = false
   public var codesHidden: Bool { hideCodes && !optionHeld }
@@ -97,7 +105,7 @@ public final class AppModel {
   private let websitePreferenceKey: String
   private let hideCodesPreferenceKey: String
   private let showSuggestionsPreferenceKey: String
-  private let globalShortcutPreferenceKey: String
+  private let keymapPreferenceKey: String
   private var login: LoginFlow?
   private var contextTask: Task<Void, Never>?
   private var contextWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
@@ -127,8 +135,9 @@ public final class AppModel {
     self.preferences = preferences
     showSuggestionsPreferenceKey = "showSuggestions.\(cacheStore.url.deletingLastPathComponent().path)"
     showSuggestions = preferences.object(forKey: showSuggestionsPreferenceKey) as? Bool ?? true
-    globalShortcutPreferenceKey = "globalShortcut.\(cacheStore.url.deletingLastPathComponent().path)"
-    globalShortcutEnabled = preferences.object(forKey: globalShortcutPreferenceKey) as? Bool ?? true
+    let profile = cacheStore.url.deletingLastPathComponent().path
+    keymapPreferenceKey = "shortcuts.\(profile)"
+    keymap = Self.loadKeymap(preferences, key: keymapPreferenceKey, legacyKey: "globalShortcut.\(profile)")
     hideCodesPreferenceKey = "hideCodes.\(cacheStore.url.deletingLastPathComponent().path)"
     hideCodes = preferences.bool(forKey: hideCodesPreferenceKey)
     websitePreferenceKey = "websiteSuggestions.\(cacheStore.url.deletingLastPathComponent().path)"
@@ -197,7 +206,7 @@ public final class AppModel {
     sessionStore.deleteLegacyLoginKeychainItem()
     do {
       phase = try sessionStore.containsSession() ? .locked : .signedOut(SignIn())
-      if visible, case .locked = phase { await unlock() }
+      if shouldAutoUnlock { await unlock() }
     } catch {
       phase = .signedOut(SignIn(error: message(error)))
     }
@@ -408,7 +417,13 @@ public final class AppModel {
     preserveSelection()
   }
 
+  private var shouldAutoUnlock: Bool {
+    guard visible, shortcutEditor == nil, case .locked = phase else { return false }
+    return true
+  }
+
   public func setVisible(_ visible: Bool) {
+    if !visible { closeShortcuts() }
     guard self.visible != visible else { return }
     self.visible = visible
     if visible { refreshLoginItemStatus() }
@@ -421,7 +436,9 @@ public final class AppModel {
       refreshContext()
       refreshCodes()
       selectFirst()
-      if case .locked = phase { Task { await unlock() } }
+      if shouldAutoUnlock {
+        Task { if shouldAutoUnlock { await unlock() } }
+      }
     } else {
       frozenUsage = nil
       optionHeld = false
@@ -491,22 +508,107 @@ public final class AppModel {
     preserveSelection()
   }
 
-  public func configureGlobalShortcut(_ registration: @escaping (Bool) -> String?) {
-    shortcutRegistration = registration
-    if let error = registration(globalShortcutEnabled) {
-      settingsError = error
-      globalShortcutEnabled = false
+  private static func loadKeymap(_ preferences: UserDefaults, key: String, legacyKey: String) -> Keymap {
+    if let keymap = Keymap(stored: preferences.data(forKey: key)) { return keymap }
+    var keymap = Keymap()
+    if preferences.object(forKey: legacyKey) as? Bool == false { keymap.clear(.openEnteAuth) }
+    return keymap
+  }
+
+  public func configureGlobalShortcut(_ register: @escaping @MainActor (KeyCombo?) throws -> Void) {
+    globalRegistration = register
+    _ = reconcileGlobalShortcut()
+  }
+
+  public func handleKeyPress(_ press: KeyCombo) -> Bool {
+    switch shortcutEditor {
+    case .recording(let action, _):
+      if press == .escape { setRecording(nil) }
+      else if press == .tab { setRecording(nil); return false }
+      else { record(press, for: action) }
+      return true
+    case .browsing:
+      guard press == .escape else { return false }
+      closeShortcuts()
+      return true
+    case nil:
+      guard let action = keymap.action(for: press), !action.isGlobal else { return false }
+      guard case .ready = phase else { return true }
+      switch action {
+      case .copyNextCode: copy(moment: .next)
+      case .syncNow: Task { await sync() }
+      case .lock: lock()
+      case .openEnteAuth: break
+      }
+      return true
     }
   }
 
-  public func setGlobalShortcutEnabled(_ enabled: Bool) {
-    if let error = shortcutRegistration?(enabled) {
-      settingsError = error
+  func showShortcuts() {
+    if shortcutEditor == nil { shortcutEditor = .browsing }
+    onOpen?()
+  }
+
+  func closeShortcuts() {
+    guard shortcutEditor != nil else { return }
+    shortcutEditor = nil
+    _ = reconcileGlobalShortcut()
+  }
+
+  func setRecording(_ action: ShortcutAction?) {
+    guard shortcutEditor != nil else { return }
+    shortcutEditor = action.map { .recording($0, problem: nil) } ?? .browsing
+    _ = reconcileGlobalShortcut()
+  }
+
+  func clearShortcut(_ action: ShortcutAction) {
+    var next = keymap
+    next.clear(action)
+    commitShortcuts(next)
+  }
+
+  func restoreDefaultShortcuts() { commitShortcuts(Keymap()) }
+
+  private func record(_ combo: KeyCombo, for action: ShortcutAction) {
+    var next = keymap
+    do throws(ShortcutProblem) {
+      try next.assign(combo, to: action, in: .current)
+    } catch {
+      shortcutEditor = .recording(action, problem: error)
       return
     }
-    settingsError = nil
-    globalShortcutEnabled = enabled
-    preferences.set(enabled, forKey: globalShortcutPreferenceKey)
+    commitShortcuts(next)
+  }
+
+  private func commitShortcuts(_ next: Keymap) {
+    if next.combo(for: .openEnteAuth) != keymap.combo(for: .openEnteAuth),
+      let problem = reconcileGlobalShortcut(committing: next) {
+      if case .recording(let action, _) = shortcutEditor {
+        unavailableGlobalShortcut = nil
+        shortcutEditor = .recording(action, problem: problem)
+      } else {
+        _ = reconcileGlobalShortcut()
+        unavailableGlobalShortcut = next.combo(for: .openEnteAuth)
+      }
+      return
+    }
+    keymap = next
+    preferences.set(keymap.stored, forKey: keymapPreferenceKey)
+    if shortcutEditor != nil { shortcutEditor = .browsing }
+    _ = reconcileGlobalShortcut()
+  }
+
+  private func reconcileGlobalShortcut(committing candidate: Keymap? = nil) -> ShortcutProblem? {
+    var desired = (candidate ?? keymap).combo(for: .openEnteAuth)
+    if candidate == nil, case .recording = shortcutEditor { desired = nil }
+    do {
+      try globalRegistration?(desired)
+      unavailableGlobalShortcut = nil
+      return nil
+    } catch {
+      unavailableGlobalShortcut = desired
+      return desired.map { .unavailable($0) }
+    }
   }
 
   public func refreshLoginItemStatus() { loginItemStatus = loginItem.status }

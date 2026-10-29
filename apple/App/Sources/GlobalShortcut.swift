@@ -1,16 +1,23 @@
+import AppCore
 import AppKit
 import Carbon
 
+struct GlobalShortcutError: Error {
+  let status: OSStatus
+}
+
 @MainActor final class GlobalShortcut {
+  private var registered: KeyCombo?
   private var hotKey: EventHotKeyRef?
   private var handler: EventHandlerRef?
   private let action: () -> Void
 
   init(action: @escaping () -> Void) { self.action = action }
 
-  func setEnabled(_ enabled: Bool) -> String? {
-    if !enabled { stop(); return nil }
-    if hotKey != nil { return nil }
+  func register(_ combo: KeyCombo?) throws {
+    if combo == registered { return }
+    stop()
+    guard let combo else { return }
     var event = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
     let installed = InstallEventHandler(GetApplicationEventTarget(), { _, event, data in
       guard let data, let event else { return OSStatus(eventNotHandledErr) }
@@ -23,15 +30,18 @@ import Carbon
       }
       return noErr
     }, 1, &event, Unmanaged.passUnretained(self).toOpaque(), &handler)
-    guard installed == noErr else { return "Unable to enable the global shortcut (\(installed))." }
-    let registered = RegisterEventHotKey(UInt32(kVK_ANSI_E), UInt32(optionKey | cmdKey),
-                                       EventHotKeyID(signature: 0x454E5445, id: 1),
-                                       GetApplicationEventTarget(), 0, &hotKey)
-    guard registered == noErr else {
+    guard installed == noErr else {
       stop()
-      return "Unable to register ⌥⌘E. Another app may be using it (\(registered))."
+      throw GlobalShortcutError(status: installed)
     }
-    return nil
+    let status = RegisterEventHotKey(UInt32(combo.key.rawValue), carbonModifiers(combo.modifiers),
+                                     EventHotKeyID(signature: 0x454E5445, id: 1),
+                                     GetApplicationEventTarget(), 0, &hotKey)
+    guard status == noErr else {
+      stop()
+      throw GlobalShortcutError(status: status)
+    }
+    registered = combo
   }
 
   func stop() {
@@ -39,5 +49,15 @@ import Carbon
     if let handler { RemoveEventHandler(handler) }
     hotKey = nil
     handler = nil
+    registered = nil
+  }
+
+  private func carbonModifiers(_ modifiers: KeyCombo.Modifiers) -> UInt32 {
+    var flags = 0
+    if modifiers.contains(.command) { flags |= cmdKey }
+    if modifiers.contains(.option) { flags |= optionKey }
+    if modifiers.contains(.control) { flags |= controlKey }
+    if modifiers.contains(.shift) { flags |= shiftKey }
+    return UInt32(flags)
   }
 }
