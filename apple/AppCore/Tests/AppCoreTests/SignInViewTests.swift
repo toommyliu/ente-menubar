@@ -4,11 +4,61 @@ import Testing
 
 @testable import AppCore
 
-@Suite @MainActor
+@Suite(.serialized) @MainActor
 struct SignInViewTests {
-  @Test func passwordReceivesFocusAfterEmailAndRejectedPassword() async throws {
+  @Test func credentialFieldsSupportKeyboardNavigation() async throws {
     _ = NSApplication.shared
-    let museum = try LocalMuseum()
+    let store = SessionStore(service: "dev.entemenubar.EnteMenubar.tests.\(UUID())", protection: .unprotectedForTests)
+    defer { try? store.delete() }
+    let model = AppModel(sessionStore: store)
+    let host = NSHostingView(rootView: PopoverView(model: model)
+      .clipShape(RoundedRectangle(cornerRadius: 10))
+      .frame(maxHeight: .infinity, alignment: .top))
+    let window = SignInTestPanel(contentRect: NSRect(x: 0, y: 0, width: 348, height: 400),
+      styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.isFloatingPanel = true
+    window.level = .popUpMenu
+    window.becomesKeyOnlyIfNeeded = false
+    window.contentView = host
+    defer { window.close() }
+    window.alphaValue = 0
+    window.makeKeyAndOrderFront(nil)
+    host.layoutSubtreeIfNeeded()
+    window.recalculateKeyViewLoop()
+    await model.launch()
+    try #require(await eventually { textFields(in: host).filter { $0.isEditable }.count == 2 })
+    let email = try #require(textFields(in: host).first { $0.isEditable && !($0 is NSSecureTextField) })
+    let password = try #require(textFields(in: host).first { $0 is NSSecureTextField })
+    #expect(window.makeFirstResponder(email))
+    #expect(window.isKeyWindow)
+    #expect(!model.handleKeyPress(.tab))
+    let emailEditor = try #require(window.firstResponder as? NSTextView)
+    emailEditor.insertText("person@example.com", replacementRange: emailEditor.selectedRange())
+    host.layoutSubtreeIfNeeded()
+    try pressTab(in: window)
+    try #require(await eventually { focusedField(in: window) === password })
+    try pressTab(in: window)
+    try #require(await eventually { focusedField(in: window) !== password })
+    #expect(window.makeFirstResponder(password))
+    try pressTab(in: window, backwards: true)
+    try #require(await eventually { focusedField(in: window) === email })
+    try enter("", in: window)
+    try #require(await eventually { focusedField(in: window) === password })
+    #expect(password.contentType == .oneTimeCode)
+    let editor = try #require(password.currentEditor() as? NSTextView)
+    #expect(editor.contentType == .oneTimeCode)
+    #expect(window.makeFirstResponder(email))
+    model.setEmail("")
+    #expect(window.makeFirstResponder(password))
+    try enter("", in: window)
+    try #require(await eventually { focusedField(in: window) === email })
+  }
+
+  @Test(arguments: [false, true])
+  func credentialsSubmitTogetherAndRetryWithoutLosingEmail(emailMFA: Bool) async throws {
+    _ = NSApplication.shared
+    let museum = try LocalMuseum(emailMFA: emailMFA)
     defer { museum.stop() }
     let store = SessionStore(
       service: "dev.entemenubar.EnteMenubar.tests.\(UUID())", protection: .unprotectedForTests)
@@ -32,21 +82,91 @@ struct SignInViewTests {
     window.alphaValue = 0
     window.orderBack(nil)
     host.layoutSubtreeIfNeeded()
-    try #require(await eventually { textFields(in: host).contains { $0.isEditable } })
-    let email = try #require(textFields(in: host).first { $0.isEditable })
+    try #require(await eventually { textFields(in: host).filter { $0.isEditable }.count == 2 })
+    let email = try #require(textFields(in: host).first { $0.isEditable && !($0 is NSSecureTextField) })
+    let password = try #require(textFields(in: host).first { $0 is NSSecureTextField })
+    #expect(email.contentType == nil)
     #expect(window.makeFirstResponder(email))
-    #expect(focusedField(in: window) === email)
-    model.setEmail(museum.fixture.email)
-    await model.submit()
-    try #require(await eventually { focusedField(in: window) is NSSecureTextField })
-    await model.submit("wrong password")
-    guard case .signedOut(let signIn) = model.phase else {
-      Issue.record("Expected password retry")
-      return
+    for _ in 0..<2 {
+      try enter("", in: window)
+      try #require(await eventually { focusedField(in: window) === password })
+      try enter("", in: window)
+      try #require(await eventually { focusedField(in: window) === email })
     }
-    #expect(signIn.step == .password)
+    try enter("  " + museum.fixture.email.uppercased() + "  ", in: window)
+    try #require(await eventually { focusedField(in: window) === password })
+    try enter("wrong password", in: window)
+    if emailMFA {
+      try #require(await eventually { isEmailCode(model) })
+      try #require(await eventually {
+        focusedField(in: window)?.contentType == .oneTimeCode
+          && !(focusedField(in: window) is NSSecureTextField)
+      })
+      try enter("000000", in: window)
+      try #require(await eventually {
+        if case .signedOut(let signIn) = model.phase { return !signIn.busy && signIn.error != nil }
+        return false
+      })
+      #expect(isEmailCode(model))
+      await model.resendCode()
+      try #require(await eventually {
+        focusedField(in: window)?.contentType == .oneTimeCode
+          && !(focusedField(in: window) is NSSecureTextField)
+      })
+      try enter("123456", in: window)
+    }
+    try #require(await eventually(within: .seconds(15)) {
+      if case .signedOut(let signIn) = model.phase {
+        return !signIn.busy && signIn.step == .credentials
+          && signIn.error == "Incorrect password. Try again."
+      }
+      return false
+    })
+    guard case .signedOut(let signIn) = model.phase else { return }
     #expect(signIn.error == "Incorrect password. Try again.")
+    #expect(signIn.email == museum.fixture.email)
+    #expect(try store.load() == nil)
     try #require(await eventually { focusedField(in: window) is NSSecureTextField })
+    try enter(museum.fixture.password, in: window)
+    if emailMFA {
+      try #require(await eventually { isEmailCode(model) })
+      try #require(await eventually {
+        focusedField(in: window)?.contentType == .oneTimeCode
+          && !(focusedField(in: window) is NSSecureTextField)
+      })
+      try enter("123456", in: window)
+    }
+    try #require(await eventually(within: .seconds(15)) {
+      if case .ready = model.phase { return true }
+      return false
+    })
+    #expect(try store.load()?.isEmpty == false)
+    #expect(await eventually { model.filteredCodes.contains { $0.issuer == "RFC" } })
+    await model.signOut()
+    try #require(await eventually {
+      textFields(in: host).filter { $0.isEditable }.count == 2
+        && textFields(in: host).first { $0 is NSSecureTextField }?.stringValue == ""
+    })
+  }
+
+  private func pressTab(in window: NSWindow, backwards: Bool = false) throws {
+    let event = try #require(NSEvent.keyEvent(
+      with: .keyDown, location: .zero, modifierFlags: backwards ? .shift : [],
+      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+      context: nil, characters: "\t", charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
+    NSApp.sendEvent(event)
+  }
+
+  private func enter(_ value: String, in window: NSWindow) throws {
+    let editor = try #require(window.firstResponder as? NSTextView)
+    editor.selectAll(nil)
+    editor.insertText(value, replacementRange: editor.selectedRange())
+    editor.insertNewline(nil)
+  }
+
+  private func isEmailCode(_ model: AppModel) -> Bool {
+    if case .signedOut(let signIn) = model.phase { return signIn.step == .emailCode && !signIn.busy }
+    return false
   }
 
   private func focusedField(in window: NSWindow) -> NSTextField? {
@@ -61,4 +181,8 @@ struct SignInViewTests {
   private func textFields(in view: NSView) -> [NSTextField] {
     (view as? NSTextField).map { [$0] } ?? view.subviews.flatMap(textFields)
   }
+}
+
+private final class SignInTestPanel: NSPanel {
+  override var canBecomeKey: Bool { true }
 }

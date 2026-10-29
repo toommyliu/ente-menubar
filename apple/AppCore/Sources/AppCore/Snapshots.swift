@@ -32,14 +32,21 @@ import SwiftUI
   let large = VaultState(codes: largeCodes, lastSuccessfulSync: Date(), syncStatus: .idle, unreadableCount: 0)
   let browser = ApplicationContext(bundleID: "net.imput.helium", name: "Helium")
   let scenes: [(String, AnyView, ColorScheme)] = [
-    ("email", AnyView(PopoverView(model: AppModel(snapshotPhase: .signedOut(SignIn())))), .light),
+    ("sign-in", AnyView(PopoverView(model: AppModel(snapshotPhase: .signedOut(SignIn())))), .light),
+    ("sign-in-dark", AnyView(PopoverView(model: AppModel(snapshotPhase: .signedOut(SignIn())))), .dark),
+    ("sign-in-busy", AnyView(PopoverView(model: AppModel(snapshotPhase: .signedOut(
+      SignIn(email: "user@example.com", busy: true))))), .light),
+    ("authenticator-code", AnyView(PopoverView(model: AppModel(snapshotPhase: .signedOut(
+      SignIn(email: "user@example.com", step: .authenticatorCode))))), .light),
+    ("passkey", AnyView(PopoverView(model: AppModel(snapshotPhase: .signedOut(
+      SignIn(email: "user@example.com", step: .passkeyUnsupported))))), .light),
     ("locked", AnyView(PopoverView(model: AppModel(snapshotPhase: .locked))), .light),
     (
-      "password",
+      "sign-in-error",
       AnyView(
         PopoverView(
           model: AppModel(
-            snapshotPhase: .signedOut(SignIn(email: "user@example.com", step: .password))))),
+            snapshotPhase: .signedOut(SignIn(email: "user@example.com", error: "Incorrect password. Try again."))))),
       .light
     ),
     (

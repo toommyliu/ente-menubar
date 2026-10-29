@@ -12,6 +12,14 @@ fn main() -> TestResult {
         let fixture = create_account(&endpoint, "swift-smoke").await?;
         let (api, _) = support::auth_api(&endpoint, &fixture.email, &fixture.password).await?;
         support::seed(&api, &fixture.master_key).await?;
+        if std::env::args().any(|arg| arg == "--email-mfa") {
+            api.put("/users/email-mfa")
+                .json(&json!({ "isEnabled": true }))
+                .send()
+                .await?
+                .error_for_code()
+                .await?;
+        }
         let mut terminate =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         println!(
