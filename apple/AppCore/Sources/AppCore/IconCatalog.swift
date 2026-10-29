@@ -87,9 +87,14 @@ struct IconBrandColor: Equatable {
     blue = Double(value & 255) / 255
   }
 
-  var usesBlackGlyph: Bool {
+  var luminance: Double {
     let linear = [red, green, blue].map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
-    let luminance = linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
-    return (luminance + 0.05) / 0.05 > 1.05 / (luminance + 0.05)
+    return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
+  }
+
+  func usesThemeColor(dark: Bool) -> Bool {
+    let tolerance = 3.5 / 255
+    let neutral = abs(red - green) <= tolerance && abs(green - blue) <= tolerance && abs(blue - red) <= tolerance
+    return neutral && (dark ? luminance < 0.05 : luminance > 0.70)
   }
 }

@@ -32,30 +32,22 @@ struct ServiceIconTile: View {
     Group {
       if let loaded {
         let brand = loaded.icon.hex.map(IconBrandColor.init)
+        let tinted = brand != nil || loaded.icon.source == .simple
         Image(nsImage: loaded.image)
           .resizable()
-          .renderingMode(loaded.icon.source == .simple ? .template : .original)
+          .renderingMode(tinted ? .template : .original)
+          .interpolation(.high)
           .scaledToFit()
-          .frame(width: loaded.icon.source == .simple ? 14 : 16, height: loaded.icon.source == .simple ? 14 : 16)
-          .foregroundStyle(brand?.usesBlackGlyph == true ? Color.black : .white)
+          .foregroundStyle(tint(brand))
+          .frame(width: 20, height: 20)
           .frame(width: 24, height: 24)
-          .background(
-            loaded.icon.source == .simple
-              ? Color(red: brand?.red ?? 0, green: brand?.green ?? 0, blue: brand?.blue ?? 0)
-              : Color(white: 0.96),
-            in: RoundedRectangle(cornerRadius: 6)
-          )
-          .overlay {
-            RoundedRectangle(cornerRadius: 6)
-              .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.1),
-                            lineWidth: 0.5)
-          }
       } else {
         Text(String((issuer.isEmpty ? account : issuer).prefix(1)).uppercased())
-          .font(.system(size: 12, weight: .semibold))
-          .frame(width: 24, height: 24)
+          .font(.system(size: 11, weight: .semibold))
+          .frame(width: 22, height: 22)
           .foregroundStyle(.secondary)
-          .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+          .background(Color.primary.opacity(0.09), in: Circle())
+          .frame(width: 24, height: 24)
       }
     }
     .accessibilityHidden(true)
@@ -68,5 +60,10 @@ struct ServiceIconTile: View {
         loaded = nil
       }
     }
+  }
+
+  private func tint(_ brand: IconBrandColor?) -> Color {
+    guard let brand, !brand.usesThemeColor(dark: colorScheme == .dark) else { return .primary }
+    return Color(red: brand.red, green: brand.green, blue: brand.blue)
   }
 }
