@@ -4,10 +4,17 @@ import SwiftUI
 
 @main
 struct EnteMenubarApp: App {
-  @State private var model: AppModel
-  private let lockObserver: LockObserver
+  @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
-  init() {
+  var body: some Scene { Settings { EmptyView() } }
+}
+
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
+  private var model: AppModel?
+  private var lockObserver: LockObserver?
+  private var statusItemController: StatusItemController?
+
+  func applicationDidFinishLaunching(_ notification: Notification) {
     if CommandLine.arguments.contains("--delete-local-session") {
       do {
         let store = SessionStore(
@@ -22,17 +29,12 @@ struct EnteMenubarApp: App {
       }
     }
     let model = AppModel.live()
-    _model = State(initialValue: model)
+    self.model = model
+    NSApp.setActivationPolicy(.accessory)
     lockObserver = LockObserver(model: model)
+    statusItemController = StatusItemController(model: model)
     Task { await model.run() }
   }
 
-  var body: some Scene {
-    MenuBarExtra {
-      PopoverView(model: model)
-    } label: {
-      Image("MenuBarIcon").accessibilityLabel("Ente Auth")
-    }
-    .menuBarExtraStyle(.window)
-  }
+  func applicationWillTerminate(_ notification: Notification) { statusItemController?.stop() }
 }

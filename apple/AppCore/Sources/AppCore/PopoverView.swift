@@ -153,6 +153,7 @@ private struct SignInView: View {
     }
     .padding(22)
     .onAppear { focused = true }
+    .onChange(of: model.visible) { _, visible in if visible { focused = true } }
     .onChange(of: signIn.step) { _, _ in
       value = ""
       focused = true
@@ -201,8 +202,7 @@ struct VaultView: View {
 
   var body: some View {
     let rows = model.rows(for: state)
-    let codes = rows.compactMap(\.code)
-    let timedCode = codes.filter { $0.kind != .hotp }.min { $0.periodSecs < $1.periodSecs }
+    let timing = CodeTiming.selected(in: rows, selection: model.selectedRowID)
     let count = state.codes.filter { !$0.display.trashed }.count
     VStack(spacing: 0) {
       HStack(spacing: 6) {
@@ -238,7 +238,7 @@ struct VaultView: View {
       .frame(height: 28)
       .background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
       .overlay(alignment: .bottom) {
-        CountdownLine(periodSecs: timedCode?.periodSecs, paused: !model.visible)
+        CountdownLine(timing: timing, sampledAt: model.codeSampleDate, paused: !model.visible)
       }
       .clipShape(RoundedRectangle(cornerRadius: 7))
       .padding(.horizontal, 10)
@@ -257,6 +257,7 @@ struct VaultView: View {
             }
           }.padding(.horizontal, 6).padding(.bottom, 6)
         }
+        .scrollIndicators(.never)
         .frame(height: listHeight(rows))
         .onChange(of: model.selectedRowID) { _, id in
           if let id { proxy.scrollTo(id) }
@@ -293,14 +294,16 @@ struct VaultView: View {
       .foregroundStyle(.secondary)
       .padding(.horizontal, 10).padding(.top, 9).padding(.bottom, 4)
       .accessibilityAddTraits(.isHeader)
-    case .code(_, let code):
+    case .code(let section, let code):
       CodeRow(
         code: code, selected: model.selectedRowID == row.id, copied: model.copiedID == code.id,
         copy: {
           model.activate(row.id)
           searchFocused = true
         },
-        hover: { model.select(row.id) })
+        hover: { model.select(row.id) }, hidden: model.codesHidden,
+        copyNext: { model.copy(id: code.id, moment: .next) },
+        dismissSuggestion: section == .suggested ? { model.dismissSuggestion(id: code.id) } : nil)
     case .more(let count, let label):
       actionRow("\(count) more for \(label)", row: row)
     case .showAll(let count):
@@ -358,6 +361,9 @@ struct CodeRow: View {
   let copied: Bool
   let copy: () -> Void
   let hover: () -> Void
+  let hidden: Bool
+  let copyNext: () -> Void
+  let dismissSuggestion: (() -> Void)?
 
   var body: some View {
     Button(action: copy) {
@@ -386,9 +392,9 @@ struct CodeRow: View {
             Label("Copied", systemImage: "checkmark").font(.system(size: 13, weight: .semibold))
               .foregroundStyle(.green)
           } else {
-            Text(grouped(code.current)).font(.system(size: 17, weight: .semibold)).monospacedDigit()
-            if selected && code.remainingMs <= 5000 {
-              Text("next \(grouped(code.next))").font(.system(size: 10.5)).monospacedDigit()
+            Text(CodePresentation(code.current, hidden: hidden).text).font(.system(size: 17, weight: .semibold)).monospacedDigit()
+            if selected && CodeTiming(code: code).isExpiring {
+              Text("next \(CodePresentation(code.next, hidden: hidden).text)").font(.system(size: 10.5)).monospacedDigit()
                 .foregroundStyle(.secondary)
             }
           }
@@ -399,34 +405,36 @@ struct CodeRow: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+    .contextMenu {
+      if code.kind != .hotp {
+        Button("Copy Code", action: copy)
+        Button("Copy Next Code", action: copyNext)
+      }
+      if let dismissSuggestion {
+        if code.kind != .hotp { Divider() }
+        Button("Don't Suggest Here", action: dismissSuggestion)
+      }
+    }
     .background(selected ? Color.primary.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 6))
     .onHover { if $0 { hover() } }
     .accessibilityLabel(
-      "\(code.issuer), \(code.account), \(code.kind == .hotp ? "HOTP isn't supported yet" : copied ? "Copied" : grouped(code.current))"
+      Text(verbatim: "\(code.issuer), \(code.account), \(code.kind == .hotp ? "HOTP isn't supported yet" : copied ? "Copied" : CodePresentation(code.current, hidden: hidden).accessibilityLabel)")
     )
     .accessibilityHint(code.kind == .hotp ? "" : "Copy current code")
     .accessibilityAddTraits(selected ? [.isSelected] : [])
   }
-
-  private func grouped(_ code: String) -> String {
-    guard code.allSatisfy(\.isNumber) else { return code }
-    switch code.count {
-    case 6: return "\(code.prefix(3)) \(code.suffix(3))"
-    case 8: return "\(code.prefix(4)) \(code.suffix(4))"
-    default: return code
-    }
-  }
 }
 
 private struct CountdownLine: View {
-  let periodSecs: UInt64?
+  let timing: CodeTiming?
+  let sampledAt: Date
   let paused: Bool
 
   var body: some View {
-    TimelineView(.animation(minimumInterval: 1.0 / 30, paused: paused || periodSecs == nil)) {
+    TimelineView(.animation(minimumInterval: 1.0 / 30, paused: paused || timing == nil)) {
       context in
-      let period = Double(max(periodSecs ?? 30, 1))
-      let remaining = period - context.date.timeIntervalSince1970.truncatingRemainder(dividingBy: period)
+      let period = Double(max(timing?.code.periodSecs ?? 30, 1))
+      let remaining = timing?.remaining(at: context.date, sampledAt: sampledAt) ?? 0
       GeometryReader { geometry in
         Rectangle()
           .fill(remaining <= 5 ? Color.orange.opacity(0.85) : Color.accentColor.opacity(0.55))
@@ -437,7 +445,7 @@ private struct CountdownLine: View {
       .accessibilityValue("\(Int(remaining.rounded(.up))) seconds")
     }
     .frame(height: 2)
-    .opacity(periodSecs == nil ? 0 : 1)
+    .opacity(timing == nil ? 0 : 1)
   }
 }
 
@@ -452,6 +460,7 @@ struct VaultFooter: View {
         Text("\(status) · \(count) \(count == 1 ? "code" : "codes")")
         if case .failed(let message) = state.syncStatus { Text(message).foregroundStyle(.red) }
         if let usageError = model.usageError { Text(usageError) }
+        if let settingsError = model.settingsError { Text(settingsError) }
         if state.unreadableCount > 0 {
           Text(
             "\(state.unreadableCount) \(state.unreadableCount == 1 ? "entry couldn't" : "entries couldn't") be read"
@@ -462,21 +471,8 @@ struct VaultFooter: View {
       .foregroundStyle(.secondary)
       .fixedSize(horizontal: false, vertical: true)
       Spacer(minLength: 0)
-      Menu {
-        Toggle("Website suggestions", isOn: Binding(
-          get: { model.websiteSuggestions }, set: model.setWebsiteSuggestions))
-        Divider()
-        Button("Sign Out") { Task { await model.signOut() } }
-        Divider()
-        Button("Quit") { NSApplication.shared.terminate(nil) }.keyboardShortcut("q")
-      } label: {
-        Image(systemName: "ellipsis.circle").font(.system(size: 15))
-          .frame(width: 24, height: 24)
-      }
-      .menuStyle(.borderlessButton)
-      .menuIndicator(.hidden)
-      .fixedSize()
-      .accessibilityLabel("Account menu")
+      AccountMenuButton(model: model)
+        .frame(width: 24, height: 24)
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 7)
