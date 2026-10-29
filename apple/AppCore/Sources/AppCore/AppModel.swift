@@ -13,11 +13,11 @@ public enum Phase {
 
 public struct SignIn {
   public enum Step: Equatable {
-    case email, password, emailCode, authenticatorCode, passkeyUnsupported
+    case credentials, emailCode, authenticatorCode, passkeyUnsupported
   }
 
   public var email = ""
-  public var step: Step = .email
+  public var step: Step = .credentials
   public var busy = false
   public var error: String?
 }
@@ -258,19 +258,35 @@ public final class AppModel {
   }
 
   public func setEmail(_ email: String) {
-    guard case .signedOut(var signIn) = phase, !signIn.busy else { return }
+    guard case .signedOut(var signIn) = phase, signIn.step == .credentials, !signIn.busy else { return }
     signIn.email = email
     phase = .signedOut(signIn)
   }
 
-  public func submit(_ value: String = "") async {
-    guard case .signedOut(var signIn) = phase, !signIn.busy else { return }
-    signIn.busy = true
+  public func submit(password: String, code: String = "") async {
+    guard case .signedOut(var signIn) = phase, !signIn.busy,
+      signIn.step != .passkeyUnsupported
+    else { return }
     signIn.error = nil
+    if signIn.step == .credentials {
+      signIn.email = signIn.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+      if signIn.email.isEmpty {
+        signIn.error = "Enter your email."
+      } else if password.isEmpty {
+        signIn.error = "Enter your password."
+      }
+    } else if code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      signIn.error = "Enter your verification code."
+    }
+    if signIn.error != nil {
+      phase = .signedOut(signIn)
+      return
+    }
+    signIn.busy = true
     phase = .signedOut(signIn)
     let flow: LoginFlow
     do {
-      if signIn.step == .email {
+      if signIn.step == .credentials {
         flow = try LoginFlow(config: config)
         login = flow
       } else if let login {
@@ -285,17 +301,28 @@ public final class AppModel {
       return
     }
     do {
-      let step: LoginStep
+      var step: LoginStep
       switch signIn.step {
-      case .email: step = try await flow.prepare(email: signIn.email)
-      case .password: step = try await flow.submitPassword(password: value)
-      case .emailCode, .authenticatorCode: step = try await flow.submitCode(code: value)
+      case .credentials: step = try await flow.prepare(email: signIn.email)
+      case .emailCode, .authenticatorCode:
+        step = try await flow.submitCode(code: code.trimmingCharacters(in: .whitespacesAndNewlines))
       case .passkeyUnsupported: return
       }
       guard login === flow else { return }
+      if case .password = step {
+        signIn.step = .credentials
+        guard !password.isEmpty else {
+          signIn.busy = false
+          signIn.error = "Enter your password."
+          phase = .signedOut(signIn)
+          return
+        }
+        step = try await flow.submitPassword(password: password)
+        guard login === flow else { return }
+      }
       switch step {
       case .emailCode: signIn.step = .emailCode
-      case .password: signIn.step = .password
+      case .password: signIn.step = .credentials
       case .authenticatorCode: signIn.step = .authenticatorCode
       case .passkeyUnsupported: signIn.step = .passkeyUnsupported
       case .complete(let session):

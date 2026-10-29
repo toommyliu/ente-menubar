@@ -45,16 +45,10 @@ struct AppModelTests {
       Issue.record("Expected signed out")
       return
     }
-    #expect(initial.step == .email)
+    #expect(initial.step == .credentials)
     model.setVisible(true)
     model.setEmail(museum.fixture.email)
-    await model.submit()
-    guard case .signedOut(let prepared) = model.phase else {
-      Issue.record("Expected password step")
-      return
-    }
-    #expect(prepared.step == .password)
-    await model.submit(museum.fixture.password)
+    await model.submit(password: museum.fixture.password)
     guard case .ready(let session) = model.phase else {
       Issue.record("Expected ready after password")
       return
@@ -133,7 +127,7 @@ struct AppModelTests {
       Issue.record("Expected signed out")
       return
     }
-    #expect(signedOut.step == .email)
+    #expect(signedOut.step == .credentials)
     #expect(signedOut.error == nil)
     try sessionStore.save(savedSession)
     try cacheStore.save(savedCache)
@@ -239,8 +233,7 @@ struct AppModelTests {
     let model = AppModel(config: config, sessionStore: store, cacheStore: cache, contextProvider: FakeContextProvider())
     await model.launch()
     model.setEmail(museum.fixture.email)
-    await model.submit()
-    await model.submit(museum.fixture.password)
+    await model.submit(password: museum.fixture.password)
     #expect(model.filteredCodes.map(\.issuer) == ["Counter", "Legacy", "RFC", "SHA256", "Steam"])
     let savedSession = try #require(try store.load())
     weak let openedVault: Vault? = {
@@ -279,7 +272,28 @@ struct AppModelTests {
     #expect(try store.load() == nil)
   }
 
-  @Test func wrongPasswordStaysAtPasswordWithInlineError() async throws {
+  @Test func emptyCredentialsStayOnTheForm() async {
+    let model = AppModel(snapshotPhase: .signedOut(SignIn()))
+    model.setEmail("  ")
+    await model.submit(password: "")
+    guard case .signedOut(let missingEmail) = model.phase else {
+      Issue.record("Expected email validation")
+      return
+    }
+    #expect(missingEmail.error == "Enter your email.")
+    #expect(!missingEmail.busy)
+    model.setEmail(" person@example.com ")
+    await model.submit(password: "")
+    guard case .signedOut(let missingPassword) = model.phase else {
+      Issue.record("Expected password validation")
+      return
+    }
+    #expect(missingPassword.email == "person@example.com")
+    #expect(missingPassword.error == "Enter your password.")
+    #expect(!missingPassword.busy)
+  }
+
+  @Test func wrongPasswordStaysOnCredentialsWithInlineError() async throws {
     let museum = try LocalMuseum()
     defer { museum.stop() }
     let store = SessionStore(
@@ -292,13 +306,12 @@ struct AppModelTests {
       sessionStore: store)
     await model.launch()
     model.setEmail(museum.fixture.email)
-    await model.submit()
-    await model.submit("wrong password")
+    await model.submit(password: "wrong password")
     guard case .signedOut(let signIn) = model.phase else {
       Issue.record("Expected sign-in error")
       return
     }
-    #expect(signIn.step == .password)
+    #expect(signIn.step == .credentials)
     #expect(signIn.error == "Incorrect password. Try again.")
     #expect(!signIn.busy)
     #expect(try store.load() == nil)
@@ -317,14 +330,16 @@ struct AppModelTests {
   private let output: Pipe
   private let errors: FileHandle
 
-  init() throws {
+  init(emailMFA: Bool = false) throws {
     var repo = URL(fileURLWithPath: #filePath)
     for _ in 0..<5 { repo.deleteLastPathComponent() }
     let process = Process()
     process.executableURL = repo.appending(path: "rust/target/debug/ente-devserver")
+    process.arguments = emailMFA ? ["--email-mfa"] : []
     process.currentDirectoryURL = repo
     let output = Pipe()
     let logURL = repo.appending(path: ".build/verification/model-museum-\(UUID()).log")
+    try FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     _ = FileManager.default.createFile(atPath: logURL.path, contents: nil)
     let errors = try FileHandle(forWritingTo: logURL)
     process.standardOutput = output

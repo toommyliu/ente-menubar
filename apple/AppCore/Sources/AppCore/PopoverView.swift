@@ -26,7 +26,7 @@ public struct PopoverView: View {
         case .launching:
           ProgressView("Opening vault…").frame(height: 180).transition(.opacity)
         case .signedOut(let signIn):
-          SignInView(model: model, signIn: signIn).id(signIn.step).transition(.opacity)
+          SignInView(model: model, signIn: signIn).transition(.opacity)
         case .locked, .unlocking:
           LockedView(model: model).transition(.opacity)
         case .ready(let session):
@@ -93,13 +93,14 @@ struct LockedView: View {
 private struct SignInView: View {
   @Bindable var model: AppModel
   let signIn: SignIn
-  @State private var value = ""
-  @FocusState private var focused: Bool
+  @State private var password = ""
+  @State private var code = ""
+  private enum Field: Hashable { case email, password, code }
+  @FocusState private var focused: Field?
 
   private var title: String {
     switch signIn.step {
-    case .email: "Sign in to Ente Auth"
-    case .password: "Enter your password"
+    case .credentials: "Sign in to Ente Auth"
     case .emailCode: "Check your email"
     case .authenticatorCode: "Enter authenticator code"
     case .passkeyUnsupported: "Passkey sign-in"
@@ -113,7 +114,7 @@ private struct SignInView: View {
         .foregroundStyle(.secondary)
       VStack(alignment: .leading, spacing: 6) {
         Text(title).font(.system(size: 20, weight: .semibold)).accessibilityAddTraits(.isHeader)
-        if signIn.step != .email {
+        if signIn.step != .credentials {
           Text(signIn.email).font(.system(size: 12)).foregroundStyle(.secondary).textSelection(
             .enabled)
         }
@@ -121,14 +122,37 @@ private struct SignInView: View {
       if signIn.step == .passkeyUnsupported {
         Text("Passkey sign-in isn't supported yet.").font(.system(size: 13))
       } else {
-        VStack(alignment: .leading, spacing: 7) {
-          Text(fieldLabel).font(.system(size: 12, weight: .medium))
-          field
-            .textFieldStyle(.roundedBorder)
-            .controlSize(.large)
-            .focused($focused)
-            .disabled(signIn.busy)
-            .onSubmit { submit() }
+        VStack(alignment: .leading, spacing: 12) {
+          if signIn.step == .credentials {
+            VStack(alignment: .leading, spacing: 7) {
+              Text("Email").font(.system(size: 12, weight: .medium))
+              TextField("name@example.com", text: Binding(get: {
+                guard case .signedOut(let current) = model.phase else { return "" }
+                return current.email
+              }, set: model.setEmail))
+                .textContentType(nil)
+                .accessibilityLabel("Email")
+                .focused($focused, equals: .email)
+                .onSubmit { focused = .password }
+            }
+            VStack(alignment: .leading, spacing: 7) {
+              Text("Password").font(.system(size: 12, weight: .medium))
+              SecureField("Password", text: $password)
+                .textContentType(nil)
+                .accessibilityLabel("Password")
+                .focused($focused, equals: .password)
+                .onSubmit { submit() }
+            }
+          } else {
+            VStack(alignment: .leading, spacing: 7) {
+              Text(codeLabel).font(.system(size: 12, weight: .medium))
+              TextField("123456", text: $code)
+                .textContentType(.oneTimeCode)
+                .accessibilityLabel(codeLabel)
+                .focused($focused, equals: .code)
+                .onSubmit { submit() }
+            }
+          }
           if signIn.step == .emailCode {
             Button("Resend code") { Task { await model.resendCode() } }
               .buttonStyle(.link)
@@ -143,10 +167,13 @@ private struct SignInView: View {
               .accessibilityLabel(error)
           }
         }
+        .textFieldStyle(.roundedBorder)
+        .controlSize(.large)
+        .disabled(signIn.busy)
         Button(action: submit) {
           HStack(spacing: 8) {
             if signIn.busy { ProgressView().controlSize(.small) }
-            Text("Continue")
+            Text(signIn.step == .credentials ? "Sign in" : "Verify")
           }.frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)
@@ -154,8 +181,12 @@ private struct SignInView: View {
         .disabled(signIn.busy)
       }
       HStack {
-        if signIn.step != .email {
-          Button("Use a different email") { Task { await model.signOut() } }
+        if signIn.step != .credentials {
+          Button("Use a different email") {
+            password = ""
+            code = ""
+            Task { await model.signOut() }
+          }.disabled(signIn.busy)
         }
         Spacer()
         Button("Quit") { NSApplication.shared.terminate(nil) }.keyboardShortcut("q")
@@ -165,41 +196,42 @@ private struct SignInView: View {
       .font(.system(size: 12))
     }
     .padding(22)
-    .onAppear { focused = true }
-    .onChange(of: model.visible) { _, visible in if visible { focused = true } }
-    .onChange(of: signIn.busy) { _, busy in if !busy { focused = true } }
-  }
-
-  private var fieldLabel: String {
-    switch signIn.step {
-    case .email: "Email"
-    case .password: "Password"
-    case .emailCode: "Email code"
-    case .authenticatorCode: "Authenticator code"
-    case .passkeyUnsupported: ""
+    .onAppear { focusField() }
+    .onChange(of: model.visible) { _, visible in if visible { focusField() } }
+    .onChange(of: signIn.busy) { _, busy in if !busy { focusField() } }
+    .onChange(of: signIn.step) { _, step in
+      code = ""
+      if step == .passkeyUnsupported { password = "" }
+      focusField()
     }
   }
 
-  @ViewBuilder private var field: some View {
+  private var codeLabel: String {
+    signIn.step == .emailCode ? "Email code" : "Authenticator code"
+  }
+
+  private func focusField() {
+    guard case .signedOut(let signIn) = model.phase else { return }
     switch signIn.step {
-    case .email:
-      TextField("name@example.com", text: Binding(get: { signIn.email }, set: model.setEmail))
-        .textContentType(.username)
-        .accessibilityLabel("Email")
-    case .password:
-      SecureField("Password", text: $value).textContentType(.password)
-        .accessibilityLabel("Password")
-    case .emailCode, .authenticatorCode:
-      TextField("123456", text: $value).textContentType(.oneTimeCode)
-        .accessibilityLabel(fieldLabel)
-    case .passkeyUnsupported:
-      EmptyView()
+    case .credentials: focused = signIn.email.isEmpty ? .email : .password
+    case .emailCode, .authenticatorCode: focused = .code
+    case .passkeyUnsupported: focused = nil
     }
   }
 
   private func submit() {
-    let submitted = value
-    Task { await model.submit(submitted) }
+    let password = password
+    let code = code
+    focused = nil
+    Task {
+      await model.submit(password: password, code: code)
+      if case .signedOut = model.phase {
+        focusField()
+      } else {
+        self.password = ""
+        self.code = ""
+      }
+    }
   }
 }
 
