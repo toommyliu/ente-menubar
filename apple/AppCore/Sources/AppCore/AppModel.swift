@@ -451,6 +451,10 @@ public final class AppModel {
     selectedRowID = selectable[min(max(index + offset, 0), selectable.count - 1)].id
   }
 
+  func select(_ id: DiscoveryRowID) {
+    if selectedRowID != id { selectedRowID = id }
+  }
+
   func activateSelection() {
     if let selectedRowID { activate(selectedRowID) }
   }

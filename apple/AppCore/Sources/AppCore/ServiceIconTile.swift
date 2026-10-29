@@ -36,26 +36,26 @@ struct ServiceIconTile: View {
           .resizable()
           .renderingMode(loaded.icon.source == .simple ? .template : .original)
           .scaledToFit()
-          .frame(width: 19, height: 19)
+          .frame(width: loaded.icon.source == .simple ? 14 : 16, height: loaded.icon.source == .simple ? 14 : 16)
           .foregroundStyle(brand?.usesBlackGlyph == true ? Color.black : .white)
-          .frame(width: 26, height: 26)
+          .frame(width: 24, height: 24)
           .background(
             loaded.icon.source == .simple
               ? Color(red: brand?.red ?? 0, green: brand?.green ?? 0, blue: brand?.blue ?? 0)
               : Color(white: 0.96),
-            in: RoundedRectangle(cornerRadius: 7)
+            in: RoundedRectangle(cornerRadius: 6)
           )
           .overlay {
-            RoundedRectangle(cornerRadius: 7)
+            RoundedRectangle(cornerRadius: 6)
               .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.1),
                             lineWidth: 0.5)
           }
       } else {
         Text(String((issuer.isEmpty ? account : issuer).prefix(1)).uppercased())
-          .font(.system(size: 12, weight: .bold))
-          .frame(width: 26, height: 26)
-          .foregroundStyle(.white)
-          .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 7))
+          .font(.system(size: 12, weight: .semibold))
+          .frame(width: 24, height: 24)
+          .foregroundStyle(.secondary)
+          .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
       }
     }
     .accessibilityHidden(true)

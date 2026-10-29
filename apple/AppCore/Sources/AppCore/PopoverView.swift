@@ -21,6 +21,7 @@ public struct PopoverView: View {
       }
     }
     .frame(width: 348)
+    .onExitCommand { NSApp.keyWindow?.close() }
     .background(.regularMaterial)
     .background(WindowVisibility { model.setVisible($0) })
     .task(id: model.visible) {
@@ -219,6 +220,10 @@ struct VaultView: View {
             model.moveSelection(-1)
             return .handled
           }
+          .onKeyPress(.escape) {
+            if model.search.isEmpty { NSApp.keyWindow?.close() } else { model.search = "" }
+            return .handled
+          }
         if !model.search.isEmpty {
           Button {
             model.search = ""
@@ -232,26 +237,13 @@ struct VaultView: View {
       .padding(.horizontal, 8)
       .frame(height: 28)
       .background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+      .overlay(alignment: .bottom) {
+        CountdownLine(periodSecs: timedCode?.periodSecs, paused: !model.visible)
+      }
+      .clipShape(RoundedRectangle(cornerRadius: 7))
       .padding(.horizontal, 10)
       .padding(.top, 10)
-
-      GeometryReader { geometry in
-        let progress =
-          timedCode.map { Double($0.remainingMs) / Double(max($0.periodSecs, 1) * 1000) } ?? 0
-        Capsule().fill(.quaternary)
-          .overlay(alignment: .leading) {
-            Capsule().fill(
-              timedCode.map { $0.remainingMs <= 5000 } == true ? Color.orange : Color.accentColor
-            )
-            .frame(width: geometry.size.width * min(max(progress, 0), 1))
-          }
-      }
-      .frame(height: 3)
-      .padding(.horizontal, 12)
-      .padding(.top, 9)
-      .padding(.bottom, 2)
-      .accessibilityLabel("Code refresh countdown")
-      .accessibilityValue("\((timedCode?.remainingMs ?? 0) / 1000) seconds")
+      .padding(.bottom, 4)
 
       ScrollViewReader { proxy in
         ScrollView {
@@ -282,7 +274,7 @@ struct VaultView: View {
     return min(440, rows.reduce(CGFloat(6)) { height, row in
       switch row {
       case .header: height + 27
-      case .code: height + 48
+      case .code: height + 42
       case .more, .showAll, .enableWebsites: height + 32
       }
     })
@@ -302,14 +294,17 @@ struct VaultView: View {
       .padding(.horizontal, 10).padding(.top, 9).padding(.bottom, 4)
       .accessibilityAddTraits(.isHeader)
     case .code(_, let code):
-      CodeRow(code: code, selected: model.selectedRowID == row.id, copied: model.copiedID == code.id) {
-        model.activate(row.id)
-        searchFocused = true
-      }
+      CodeRow(
+        code: code, selected: model.selectedRowID == row.id, copied: model.copiedID == code.id,
+        copy: {
+          model.activate(row.id)
+          searchFocused = true
+        },
+        hover: { model.select(row.id) })
     case .more(let count, let label):
       actionRow("\(count) more for \(label)", row: row)
     case .showAll(let count):
-      actionRow("Show all \(count) codes", row: row)
+      actionRow("Show \(count) \(count == 1 ? "code" : "codes")", row: row)
     case .enableWebsites:
       actionRow("Suggest codes for the website you're on", row: row, quiet: true)
     }
@@ -332,8 +327,9 @@ struct VaultView: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .background(model.selectedRowID == row.id ? Color.accentColor.opacity(0.15) : .clear,
-      in: RoundedRectangle(cornerRadius: 8))
+    .background(model.selectedRowID == row.id ? Color.primary.opacity(0.07) : .clear,
+      in: RoundedRectangle(cornerRadius: 6))
+    .onHover { if $0 { model.select(row.id) } }
     .accessibilityAddTraits(model.selectedRowID == row.id ? [.isSelected] : [])
   }
 
@@ -361,7 +357,7 @@ struct CodeRow: View {
   let selected: Bool
   let copied: Bool
   let copy: () -> Void
-  @State private var hovered = false
+  let hover: () -> Void
 
   var body: some View {
     Button(action: copy) {
@@ -377,32 +373,34 @@ struct CodeRow: View {
         .lineLimit(1)
         .help("\(code.issuer)\n\(code.account)")
         Spacer(minLength: 4)
-        VStack(alignment: .trailing, spacing: 1) {
+        VStack(alignment: .trailing, spacing: 0) {
           if code.kind == .hotp {
-            Text("HOTP isn't supported yet").font(.system(size: 11)).foregroundStyle(.secondary)
-              .frame(maxWidth: 110, alignment: .trailing).multilineTextAlignment(.trailing)
+            Text("HOTP")
+              .font(.system(size: 10.5, weight: .semibold))
+              .foregroundStyle(.tertiary)
+              .padding(.horizontal, 5)
+              .padding(.vertical, 1)
+              .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.quaternary))
+              .help("HOTP codes aren't supported yet")
           } else if copied {
-            Label("Copied", systemImage: "checkmark").font(.system(size: 14, weight: .semibold))
+            Label("Copied", systemImage: "checkmark").font(.system(size: 13, weight: .semibold))
               .foregroundStyle(.green)
           } else {
-            Text(grouped(code.current)).font(.system(size: 18, weight: .medium)).monospacedDigit()
+            Text(grouped(code.current)).font(.system(size: 17, weight: .semibold)).monospacedDigit()
             if selected && code.remainingMs <= 5000 {
-              Text("next \(grouped(code.next))").font(.system(size: 11)).monospacedDigit()
+              Text("next \(grouped(code.next))").font(.system(size: 10.5)).monospacedDigit()
                 .foregroundStyle(.secondary)
             }
           }
         }.fixedSize(horizontal: false, vertical: true)
       }
-      .padding(.horizontal, 8)
-      .frame(maxWidth: .infinity, minHeight: 48)
+      .padding(.horizontal, 10)
+      .frame(maxWidth: .infinity, minHeight: 42)
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .background(
-      selected ? Color.accentColor.opacity(0.15) : hovered ? Color.primary.opacity(0.05) : .clear,
-      in: RoundedRectangle(cornerRadius: 8)
-    )
-    .onHover { hovered = $0 }
+    .background(selected ? Color.primary.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 6))
+    .onHover { if $0 { hover() } }
     .accessibilityLabel(
       "\(code.issuer), \(code.account), \(code.kind == .hotp ? "HOTP isn't supported yet" : copied ? "Copied" : grouped(code.current))"
     )
@@ -411,8 +409,35 @@ struct CodeRow: View {
   }
 
   private func grouped(_ code: String) -> String {
-    guard code.count == 6, code.allSatisfy(\.isNumber) else { return code }
-    return "\(code.prefix(3)) \(code.suffix(3))"
+    guard code.allSatisfy(\.isNumber) else { return code }
+    switch code.count {
+    case 6: return "\(code.prefix(3)) \(code.suffix(3))"
+    case 8: return "\(code.prefix(4)) \(code.suffix(4))"
+    default: return code
+    }
+  }
+}
+
+private struct CountdownLine: View {
+  let periodSecs: UInt64?
+  let paused: Bool
+
+  var body: some View {
+    TimelineView(.animation(minimumInterval: 1.0 / 30, paused: paused || periodSecs == nil)) {
+      context in
+      let period = Double(max(periodSecs ?? 30, 1))
+      let remaining = period - context.date.timeIntervalSince1970.truncatingRemainder(dividingBy: period)
+      GeometryReader { geometry in
+        Rectangle()
+          .fill(remaining <= 5 ? Color.orange.opacity(0.85) : Color.accentColor.opacity(0.55))
+          .frame(width: geometry.size.width * remaining / period)
+      }
+      .accessibilityElement()
+      .accessibilityLabel("Code refresh countdown")
+      .accessibilityValue("\(Int(remaining.rounded(.up))) seconds")
+    }
+    .frame(height: 2)
+    .opacity(periodSecs == nil ? 0 : 1)
   }
 }
 
