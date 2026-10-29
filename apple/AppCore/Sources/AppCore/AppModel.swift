@@ -60,6 +60,8 @@ public final class AppModel {
   public private(set) var showSuggestions: Bool
   public private(set) var globalShortcutEnabled: Bool
   public private(set) var settingsError: String?
+  @ObservationIgnored public var onClose: (@MainActor () -> Void)?
+  @ObservationIgnored public var onUnlockFinished: (@MainActor () -> Void)?
   public private(set) var loginItemStatus: LoginItemStatus
   public private(set) var codeSampleDate: Date
   private let loginItem: any LoginItemManaging
@@ -207,13 +209,17 @@ public final class AppModel {
       let vault = try Vault(config: config, session: session, cache: try? cacheStore.load())
       let restored = (try? vault.codes(nowUnixMs: timestamp))?.isEmpty == false
       try open(vault, lastSync: restored ? cacheStore.modifiedAt : nil)
+      onUnlockFinished?()
       Task { await sync() }
     } catch {
       guard case .unlocking(let current) = phase, current == attempt else { return }
       phase = .locked
       if (error as? StorageError)?.isCancelled != true { unlockError = message(error) }
+      onUnlockFinished?()
     }
   }
+
+  public func requestClose() { onClose?() }
 
   public func lock() {
     optionHeld = false
@@ -457,6 +463,7 @@ public final class AppModel {
     showSuggestions = enabled
     preferences.set(enabled, forKey: showSuggestionsPreferenceKey)
     contextSearch = false
+    refreshContext()
     preserveSelection()
   }
 
@@ -472,7 +479,10 @@ public final class AppModel {
 
   public func configureGlobalShortcut(_ registration: @escaping (Bool) -> String?) {
     shortcutRegistration = registration
-    settingsError = registration(globalShortcutEnabled)
+    if let error = registration(globalShortcutEnabled) {
+      settingsError = error
+      globalShortcutEnabled = false
+    }
   }
 
   public func setGlobalShortcutEnabled(_ enabled: Bool) {
@@ -518,7 +528,7 @@ public final class AppModel {
 
   private func refreshContext() {
     contextTask?.cancel()
-    guard case .ready = phase, let application = contextProvider.application else {
+    guard showSuggestions, case .ready = phase, let application = contextProvider.application else {
       context = nil
       return
     }

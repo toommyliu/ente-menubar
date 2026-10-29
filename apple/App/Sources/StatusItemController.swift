@@ -24,9 +24,9 @@ import SwiftUI
     button.sendAction(on: [.leftMouseUp, .rightMouseUp])
     panel.delegate = self
     panel.isReleasedWhenClosed = false
+    panel.isFloatingPanel = true
     panel.level = .popUpMenu
     panel.becomesKeyOnlyIfNeeded = false
-    panel.isFloatingPanel = true
     panel.isOpaque = false
     panel.backgroundColor = .clear
     panel.hasShadow = true
@@ -54,6 +54,8 @@ import SwiftUI
       MainActor.assumeIsolated { self?.dismissForOutsideClick() }
     }
     model.configureGlobalShortcut { [weak self] in self?.hotKey.setEnabled($0) }
+    model.onClose = { [weak self] in self?.close() }
+    model.onUnlockFinished = { [weak self] in self?.focusPanel() }
   }
 
   @objc private func clicked() {
@@ -75,7 +77,13 @@ import SwiftUI
                           y: anchor.minY - size.height - 5, width: size.width, height: size.height), display: false)
     panel.makeKeyAndOrderFront(nil)
     model.setVisible(true)
-    model.setOptionHeld(panel.isKeyWindow && NSEvent.modifierFlags.contains(.option))
+    model.setOptionHeld(false)
+    focusPanel()
+  }
+
+  private func focusPanel() {
+    guard panel.isVisible else { return }
+    panel.makeKey()
     panel.contentView?.layoutSubtreeIfNeeded()
     if let field = panel.contentView.flatMap(Self.firstTextField) { panel.makeFirstResponder(field) }
   }
@@ -85,7 +93,11 @@ import SwiftUI
     return view.subviews.lazy.compactMap { firstTextField(in: $0) }.first
   }
 
-  func windowDidResignKey(_ notification: Notification) { model.setOptionHeld(false) }
+  func windowDidResignKey(_ notification: Notification) {
+    model.setOptionHeld(false)
+    if case .unlocking = model.phase { return }
+    close()
+  }
 
   private func dismissForOutsideClick() {
     if case .unlocking = model.phase { return }

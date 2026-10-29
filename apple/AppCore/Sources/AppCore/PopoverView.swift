@@ -21,9 +21,8 @@ public struct PopoverView: View {
       }
     }
     .frame(width: 348)
-    .onExitCommand { NSApp.keyWindow?.close() }
+    .onExitCommand { model.requestClose() }
     .background(.regularMaterial)
-    .background(WindowVisibility { model.setVisible($0) })
     .task(id: model.visible) {
       guard model.visible else { return }
       Task { await model.sync() }
@@ -32,7 +31,6 @@ public struct PopoverView: View {
         model.refreshCodes()
       }
     }
-    .onDisappear { model.setVisible(false) }
   }
 }
 
@@ -221,7 +219,7 @@ struct VaultView: View {
             return .handled
           }
           .onKeyPress(.escape) {
-            if model.search.isEmpty { NSApp.keyWindow?.close() } else { model.search = "" }
+            if model.search.isEmpty { model.requestClose() } else { model.search = "" }
             return .handled
           }
         if !model.search.isEmpty {
@@ -498,44 +496,6 @@ struct VaultFooter: View {
     case .syncing: return "Syncing…"
     case .offline: return "Offline, last synced \(age)"
     case .idle, .failed: return elapsed == nil ? "Not synced yet" : "Synced \(age)"
-    }
-  }
-}
-
-private struct WindowVisibility: NSViewRepresentable {
-  let changed: (Bool) -> Void
-
-  func makeNSView(context: Context) -> VisibilityView { VisibilityView(changed: changed) }
-  func updateNSView(_ nsView: VisibilityView, context: Context) {}
-
-  final class VisibilityView: NSView {
-    let changed: (Bool) -> Void
-
-    init(changed: @escaping (Bool) -> Void) {
-      self.changed = changed
-      super.init(frame: .zero)
-    }
-
-    required init?(coder: NSCoder) { nil }
-
-    override func viewDidMoveToWindow() {
-      super.viewDidMoveToWindow()
-      NotificationCenter.default.removeObserver(self)
-      if let window {
-        for name in [
-          NSWindow.didChangeOcclusionStateNotification, NSWindow.didBecomeKeyNotification,
-          NSWindow.didResignKeyNotification,
-        ] {
-          NotificationCenter.default.addObserver(
-            self, selector: #selector(updateVisibility), name: name, object: window)
-        }
-      }
-      updateVisibility()
-    }
-
-    @objc private func updateVisibility() {
-      let visible = window.map { $0.isVisible && $0.occlusionState.contains(.visible) } ?? false
-      Task { @MainActor in changed(visible) }
     }
   }
 }
