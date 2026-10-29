@@ -64,6 +64,10 @@ import Testing
     #expect(saved.codes[id]?.activity.count == 8)
     #expect(saved.codes[id]?.activity.lastUsedAt == instant)
     #expect(saved.codes[id]?.contexts["login.example"]?.count == 1)
+    model.copy()
+    #expect(try usageStore.load().codes[id]?.contexts["login.example"]?.count == 2)
+    model.search = ""
+    #expect(model.rows.first?.id != .header(.suggested))
     model.setVisible(false)
     model.setVisible(true)
     #expect(model.search == "")
@@ -76,7 +80,8 @@ import Testing
     model.setVisible(true)
     model.search = "rfc"
     model.copy()
-    #expect(try usageStore.load().codes[id]?.contexts["com.apple.Terminal"]?.count == 1)
+    model.copy()
+    #expect(try usageStore.load().codes[id]?.contexts["com.apple.Terminal"]?.count == 2)
     model.setVisible(false)
     model.setVisible(true)
     #expect(model.rows.first(where: \.selectable)?.code?.id == id)
@@ -88,7 +93,7 @@ import Testing
     let relaunched = AppModel(config: config, sessionStore: store, cacheStore: cache, pasteboard: board,
       contextProvider: fake, preferences: preferences, now: { instant })
     #expect(relaunched.websiteSuggestions == true)
-    #expect(relaunched.usage.codes[id]?.activity.count == 9)
+    #expect(relaunched.usage.codes[id]?.activity.count == 11)
     #expect(relaunched.usage.codes[id]?.dismissedContexts == ["com.apple.Terminal"])
     await model.signOut()
     #expect(try usageStore.file.load() == nil)

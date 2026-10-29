@@ -43,10 +43,13 @@ struct IconCatalogTests {
   }
 
   @Test func glyphContrastUsesLiteralBrandColors() {
-    #expect(IconBrandColor(hex: "000000").usesBlackGlyph == false)
-    #expect(IconBrandColor(hex: "FFFFFF").usesBlackGlyph == true)
-    #expect(IconBrandColor(hex: "FFFC00").usesBlackGlyph == true)
-    #expect(IconBrandColor(hex: "181717").usesBlackGlyph == false)
+    #expect(IconBrandColor(hex: "000000").usesThemeColor(dark: true) == true)
+    #expect(IconBrandColor(hex: "000000").usesThemeColor(dark: false) == false)
+    #expect(IconBrandColor(hex: "181717").usesThemeColor(dark: true) == true)
+    #expect(IconBrandColor(hex: "FFFFFF").usesThemeColor(dark: false) == true)
+    #expect(IconBrandColor(hex: "FFFFFF").usesThemeColor(dark: true) == false)
+    #expect(IconBrandColor(hex: "F38020").usesThemeColor(dark: true) == false)
+    #expect(IconBrandColor(hex: "FFFC00").usesThemeColor(dark: false) == false)
   }
 
   @Test @MainActor func imagesLoadByCatalogKey() throws {
