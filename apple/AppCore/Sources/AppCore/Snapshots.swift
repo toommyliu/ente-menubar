@@ -54,6 +54,9 @@ import SwiftUI
     ),
     ("ready-light", snapshotVault(ready), .light),
     ("ready-dark", snapshotVault(ready), .dark),
+    ("hidden-codes", snapshotVault(ready, hideCodes: true), .light),
+    ("hidden-option-held", snapshotVault(ready, hideCodes: true, optionHeld: true), .light),
+    ("large-scrolling", snapshotVault(large, allExpanded: true), .light),
     ("copied", snapshotVault(ready, copiedID: "GitHub"), .light),
     ("search-empty", snapshotVault(ready, search: "nothing matches"), .light),
     ("offline", snapshotVault(offline), .light),
@@ -107,9 +110,11 @@ private func snapshotCode(
 
 @MainActor private func snapshotVault(
   _ state: VaultState, search: String = "", copiedID: String? = nil,
-  context: ForegroundContext? = nil, websiteSuggestions: Bool = true
+  context: ForegroundContext? = nil, websiteSuggestions: Bool = true,
+  hideCodes: Bool = false, optionHeld: Bool = false, allExpanded: Bool = false
 ) -> AnyView {
   let model = AppModel(snapshotPhase: .signedOut(SignIn()), search: search, copiedID: copiedID,
-    snapshotState: state, context: context, websiteSuggestions: websiteSuggestions)
+    snapshotState: state, context: context, websiteSuggestions: websiteSuggestions,
+    hideCodes: hideCodes, optionHeld: optionHeld, allExpanded: allExpanded)
   return AnyView(VaultView(model: model, state: state))
 }
