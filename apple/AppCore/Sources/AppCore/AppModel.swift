@@ -152,11 +152,14 @@ public final class AppModel {
     snapshotPhase: Phase, search: String = "", copiedID: String? = nil,
     snapshotState: VaultState? = nil, context: ForegroundContext? = nil,
     usage: UsageHistory = UsageHistory(), websiteSuggestions: Bool = true,
-    hideCodes: Bool = false, optionHeld: Bool = false, allExpanded: Bool = false
+    hideCodes: Bool = false, optionHeld: Bool = false, allExpanded: Bool = false,
+    shortcutEditor: ShortcutEditor? = nil, unavailableGlobalShortcut: KeyCombo? = nil
   ) {
     self.init(
       config: Self.configuration(environment: ["ENTE_MENUBAR_API_ORIGIN": "http://127.0.0.1:1"]),
       cacheStore: CacheStore(url: URL(fileURLWithPath: "/dev/null/snapshot/cache.bin")))
+    self.shortcutEditor = shortcutEditor
+    self.unavailableGlobalShortcut = unavailableGlobalShortcut
     self.allExpanded = allExpanded
     self.hideCodes = hideCodes
     self.optionHeld = optionHeld

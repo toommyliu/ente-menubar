@@ -8,25 +8,30 @@ public struct PopoverView: View {
   public init(model: AppModel) { self.model = model }
 
   private var phaseKey: Int {
+    if model.shortcutEditor != nil { return 4 }
     switch model.phase {
-    case .launching: 0
-    case .signedOut: 1
-    case .locked, .unlocking: 2
-    case .ready: 3
+    case .launching: return 0
+    case .signedOut: return 1
+    case .locked, .unlocking: return 2
+    case .ready: return 3
     }
   }
 
   public var body: some View {
     Group {
-      switch model.phase {
-      case .launching:
-        ProgressView("Opening vault…").frame(height: 180).transition(.opacity)
-      case .signedOut(let signIn):
-        SignInView(model: model, signIn: signIn).transition(.opacity)
-      case .locked, .unlocking:
-        LockedView(model: model).transition(.opacity)
-      case .ready(let session):
-        VaultView(model: model, state: session.state).transition(.opacity)
+      if let editor = model.shortcutEditor {
+        ShortcutsView(model: model, editor: editor).transition(.opacity)
+      } else {
+        switch model.phase {
+        case .launching:
+          ProgressView("Opening vault…").frame(height: 180).transition(.opacity)
+        case .signedOut(let signIn):
+          SignInView(model: model, signIn: signIn).transition(.opacity)
+        case .locked, .unlocking:
+          LockedView(model: model).transition(.opacity)
+        case .ready(let session):
+          VaultView(model: model, state: session.state).transition(.opacity)
+        }
       }
     }
     .animation(.easeInOut(duration: 0.2), value: phaseKey)
@@ -508,6 +513,13 @@ struct VaultFooter: View {
         if case .failed(let message) = state.syncStatus { Text(message).foregroundStyle(.red) }
         if let usageError = model.usageError { Text(usageError) }
         if let settingsError = model.settingsError { Text(settingsError) }
+        if let combo = model.unavailableGlobalShortcut {
+          HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(ShortcutProblem.unavailable(combo).message(in: .current))
+            Button("Change…") { model.showShortcuts() }.buttonStyle(.link)
+              .fixedSize().accessibilityLabel("Change global shortcut")
+          }
+        }
         if state.unreadableCount > 0 {
           Text(
             "\(state.unreadableCount) \(state.unreadableCount == 1 ? "entry couldn't" : "entries couldn't") be read"

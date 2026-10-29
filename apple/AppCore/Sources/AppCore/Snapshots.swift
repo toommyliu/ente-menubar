@@ -52,6 +52,14 @@ import SwiftUI
                 email: "user@example.com", step: .emailCode,
                 error: "Incorrect or expired code. Try again."))))), .light
     ),
+    ("shortcuts", AnyView(PopoverView(model: AppModel(snapshotPhase: .locked, shortcutEditor: .browsing))), .light),
+    ("shortcuts-dark", AnyView(PopoverView(model: AppModel(snapshotPhase: .locked, shortcutEditor: .browsing))), .dark),
+    ("shortcuts-recording-taken", AnyView(PopoverView(model: AppModel(snapshotPhase: .locked,
+      shortcutEditor: .recording(.syncNow, problem: .taken(KeyCombo(.l, .command), by: .lock))))), .light),
+    ("shortcuts-global-unavailable", AnyView(PopoverView(model: AppModel(snapshotPhase: .locked,
+      shortcutEditor: .browsing, unavailableGlobalShortcut: KeyCombo(.e, [.option, .command])))), .light),
+    ("global-shortcut-unavailable", snapshotVault(ready,
+      unavailableGlobalShortcut: KeyCombo(.e, [.option, .command])), .light),
     ("ready-light", snapshotVault(ready), .light),
     ("ready-dark", snapshotVault(ready), .dark),
     ("hidden-codes", snapshotVault(ready, hideCodes: true), .light),
@@ -115,10 +123,12 @@ private func snapshotCode(
 @MainActor private func snapshotVault(
   _ state: VaultState, search: String = "", copiedID: String? = nil,
   context: ForegroundContext? = nil, websiteSuggestions: Bool = true,
-  hideCodes: Bool = false, optionHeld: Bool = false, allExpanded: Bool = false
+  hideCodes: Bool = false, optionHeld: Bool = false, allExpanded: Bool = false,
+  unavailableGlobalShortcut: KeyCombo? = nil
 ) -> AnyView {
   let model = AppModel(snapshotPhase: .signedOut(SignIn()), search: search, copiedID: copiedID,
     snapshotState: state, context: context, websiteSuggestions: websiteSuggestions,
-    hideCodes: hideCodes, optionHeld: optionHeld, allExpanded: allExpanded)
+    hideCodes: hideCodes, optionHeld: optionHeld, allExpanded: allExpanded,
+    unavailableGlobalShortcut: unavailableGlobalShortcut)
   return AnyView(VaultView(model: model, state: state))
 }
