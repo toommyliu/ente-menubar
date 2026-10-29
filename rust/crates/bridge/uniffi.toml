@@ -1,0 +1,4 @@
+[bindings.swift]
+module_name = "EnteBridge"
+ffi_module_name = "EnteBridgeFFI"
+link_frameworks = ["Foundation", "Security", "SystemConfiguration"]

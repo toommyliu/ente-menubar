@@ -1,0 +1,11 @@
+[workspace]
+resolver = "3"
+members = ["crates/bridge", "crates/devserver", "crates/uniffi-bindgen"]
+
+[workspace.package]
+edition = "2024"
+license = "AGPL-3.0-only"
+publish = false
+
+[profile.dev.package."*"]
+opt-level = 3
