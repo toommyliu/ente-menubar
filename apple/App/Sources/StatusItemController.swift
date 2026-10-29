@@ -156,24 +156,12 @@ private final class CodePanel: NSPanel {
 }
 
 private final class PopoverHost<Content: View>: NSHostingView<Content> {
-  private var targetSize: NSSize?
-
   override func layout() {
     super.layout()
     guard let window else { return }
     let size = fittingSize
-    guard size != targetSize else { return }
-    let animate = targetSize != nil && window.isVisible
-    targetSize = size
-    let frame = NSRect(x: window.frame.minX, y: window.frame.maxY - size.height, width: size.width, height: size.height)
-    guard animate else {
-      window.setFrame(frame, display: true)
-      return
-    }
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.18
-      context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-      window.animator().setFrame(frame, display: true)
-    }
+    guard window.frame.size != size else { return }
+    window.setFrame(NSRect(x: window.frame.minX, y: window.frame.maxY - size.height, width: size.width, height: size.height),
+                    display: true)
   }
 }

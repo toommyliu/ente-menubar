@@ -263,12 +263,11 @@ struct VaultView: View {
               }
             } else {
               ForEach(rows) { row in
-                discoveryRow(row).id(row.id).transition(.opacity)
+                discoveryRow(row).id(row.id)
               }
             }
           }
           .padding(.horizontal, 6).padding(.bottom, 6)
-          .animation(.easeOut(duration: 0.15), value: rows.map(\.id))
         }
         .scrollIndicators(.never)
         .frame(height: listHeight(rows))
