@@ -8,20 +8,41 @@ import Testing
 struct SignInViewTests {
   @Test func focusedPasswordFieldDisablesSuggestions() async throws {
     _ = NSApplication.shared
-    let model = AppModel(snapshotPhase: .signedOut(SignIn()))
-    let host = NSHostingView(rootView: PopoverView(model: model))
-    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 348, height: 400),
-      styleMask: .titled, backing: .buffered, defer: false)
+    let store = SessionStore(service: "dev.entemenubar.EnteMenubar.tests.\(UUID())", protection: .unprotectedForTests)
+    defer { try? store.delete() }
+    let model = AppModel(sessionStore: store)
+    let host = NSHostingView(rootView: PopoverView(model: model)
+      .clipShape(RoundedRectangle(cornerRadius: 10))
+      .frame(maxHeight: .infinity, alignment: .top))
+    let window = SignInTestPanel(contentRect: NSRect(x: 0, y: 0, width: 348, height: 400),
+      styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
+    window.isFloatingPanel = true
+    window.level = .popUpMenu
+    window.becomesKeyOnlyIfNeeded = false
     window.contentView = host
     defer { window.close() }
     window.alphaValue = 0
-    window.orderBack(nil)
+    window.makeKeyAndOrderFront(nil)
     host.layoutSubtreeIfNeeded()
+    window.recalculateKeyViewLoop()
+    await model.launch()
     try #require(await eventually { textFields(in: host).filter { $0.isEditable }.count == 2 })
     let email = try #require(textFields(in: host).first { $0.isEditable && !($0 is NSSecureTextField) })
     let password = try #require(textFields(in: host).first { $0 is NSSecureTextField })
     #expect(window.makeFirstResponder(email))
+    #expect(window.isKeyWindow)
+    #expect(!model.handleKeyPress(.tab))
+    let emailEditor = try #require(window.firstResponder as? NSTextView)
+    emailEditor.insertText("person@example.com", replacementRange: emailEditor.selectedRange())
+    host.layoutSubtreeIfNeeded()
+    try pressTab(in: window)
+    try #require(await eventually { focusedField(in: window) === password })
+    try pressTab(in: window)
+    try #require(await eventually { focusedField(in: window) !== password })
+    #expect(window.makeFirstResponder(password))
+    try pressTab(in: window, backwards: true)
+    try #require(await eventually { focusedField(in: window) === email })
     try enter("", in: window)
     try #require(await eventually { focusedField(in: window) === password })
     #expect(password.contentType == .newPassword)
@@ -30,6 +51,7 @@ struct SignInViewTests {
     #expect(editor.contentType == .newPassword)
     #expect(!editor.isAutomaticTextCompletionEnabled)
     #expect(window.makeFirstResponder(email))
+    model.setEmail("")
     #expect(window.makeFirstResponder(password))
     try enter("", in: window)
     try #require(await eventually { focusedField(in: window) === email })
@@ -120,6 +142,14 @@ struct SignInViewTests {
     })
   }
 
+  private func pressTab(in window: NSWindow, backwards: Bool = false) throws {
+    let event = try #require(NSEvent.keyEvent(
+      with: .keyDown, location: .zero, modifierFlags: backwards ? .shift : [],
+      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+      context: nil, characters: "\t", charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
+    NSApp.sendEvent(event)
+  }
+
   private func enter(_ value: String, in window: NSWindow) throws {
     let editor = try #require(window.firstResponder as? NSTextView)
     editor.selectAll(nil)
@@ -144,4 +174,8 @@ struct SignInViewTests {
   private func textFields(in view: NSView) -> [NSTextField] {
     (view as? NSTextField).map { [$0] } ?? view.subviews.flatMap(textFields)
   }
+}
+
+private final class SignInTestPanel: NSPanel {
+  override var canBecomeKey: Bool { true }
 }
