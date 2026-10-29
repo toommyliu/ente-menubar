@@ -11,7 +11,7 @@ This project is not made by or affiliated with Ente.
 - Keeps your session in the keychain and your codes in an encrypted cache, so it works offline.
 - Copies a code on click or Return. Clipboard managers skip copied codes, and the app clears them after 30 seconds.
 - Hides codes behind dots if you turn on **Hide Codes**. Hold Option to see them.
-- Opens from anywhere with Option-Command-E.
+- Opens from anywhere with Option-Command-E. Choose **Keyboard Shortcuts…** in the right-click menu to change it or the Sync Now, Lock, and Copy Next Code shortcuts, or to clear one and turn it off.
 - Searches names, accounts, notes, and `#tags`.
 - Suggests codes for the app you came from, and for the website in your browser if you turn that on.
 
