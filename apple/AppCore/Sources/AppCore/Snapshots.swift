@@ -16,31 +16,37 @@ import SwiftUI
   let offline = VaultState(
     codes: codes, lastSuccessfulSync: Date().addingTimeInterval(-300),
     syncStatus: .offline(since: Date()), unreadableCount: 2)
-  let scenes: [(String, AppModel, ColorScheme)] = [
-    ("email", AppModel(snapshotPhase: .signedOut(SignIn())), .light),
+  let scenes: [(String, AnyView, ColorScheme)] = [
+    ("email", AnyView(PopoverView(model: AppModel(snapshotPhase: .signedOut(SignIn())))), .light),
+    ("locked", AnyView(PopoverView(model: AppModel(snapshotPhase: .locked))), .light),
     (
       "password",
-      AppModel(snapshotPhase: .signedOut(SignIn(email: "user@example.com", step: .password))),
+      AnyView(
+        PopoverView(
+          model: AppModel(
+            snapshotPhase: .signedOut(SignIn(email: "user@example.com", step: .password))))),
       .light
     ),
     (
       "code-error",
-      AppModel(
-        snapshotPhase: .signedOut(
-          SignIn(
-            email: "user@example.com", step: .emailCode,
-            error: "Incorrect or expired code. Try again."))), .light
+      AnyView(
+        PopoverView(
+          model: AppModel(
+            snapshotPhase: .signedOut(
+              SignIn(
+                email: "user@example.com", step: .emailCode,
+                error: "Incorrect or expired code. Try again."))))), .light
     ),
-    ("ready-light", AppModel(snapshotPhase: .ready(ready)), .light),
-    ("ready-dark", AppModel(snapshotPhase: .ready(ready)), .dark),
-    ("copied", AppModel(snapshotPhase: .ready(ready), copiedID: "GitHub"), .light),
-    ("search-empty", AppModel(snapshotPhase: .ready(ready), search: "nothing matches"), .light),
-    ("offline", AppModel(snapshotPhase: .ready(offline)), .light),
+    ("ready-light", snapshotVault(ready), .light),
+    ("ready-dark", snapshotVault(ready), .dark),
+    ("copied", snapshotVault(ready, copiedID: "GitHub"), .light),
+    ("search-empty", snapshotVault(ready, search: "nothing matches"), .light),
+    ("offline", snapshotVault(offline), .light),
   ]
-  for (name, model, scheme) in scenes {
+  for (name, view, scheme) in scenes {
     let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
     let host = NSHostingView(
-      rootView: PopoverView(model: model).background(Color(nsColor: .windowBackgroundColor)))
+      rootView: view.frame(width: 348).background(Color(nsColor: .windowBackgroundColor)))
     host.appearance = appearance
     host.frame = CGRect(origin: .zero, size: host.fittingSize)
     let window = NSWindow(
@@ -76,4 +82,11 @@ private func snapshotCode(
     display: Display(
       pinned: pinned, trashed: false, tags: [], note: "", iconSrc: "", iconId: "",
       tapCount: 0, lastUsedAt: 0))
+}
+
+@MainActor private func snapshotVault(
+  _ state: VaultState, search: String = "", copiedID: String? = nil
+) -> AnyView {
+  let model = AppModel(snapshotPhase: .signedOut(SignIn()), search: search, copiedID: copiedID)
+  return AnyView(VaultView(model: model, state: state))
 }

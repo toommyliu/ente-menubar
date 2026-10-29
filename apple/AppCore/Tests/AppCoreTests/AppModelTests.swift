@@ -11,7 +11,7 @@ struct AppModelTests {
     let museum = try LocalMuseum()
     defer { museum.stop() }
     let service = "dev.entemenubar.EnteMenubar.tests.\(UUID())"
-    let sessionStore = SessionStore(service: service)
+    let sessionStore = SessionStore(service: service, protection: .unprotectedForTests)
     let directory = FileManager.default.temporaryDirectory.appending(
       path: "EnteMenubar-tests-\(UUID())")
     let cacheStore = CacheStore(url: directory.appending(path: "cache.bin"))
@@ -27,13 +27,15 @@ struct AppModelTests {
     ])
     let model = AppModel(
       config: config, sessionStore: sessionStore, cacheStore: cacheStore,
-      pasteboard: pasteboard, now: { instant })
+      pasteboard: pasteboard, now: { instant },
+      clipboardLifetime: .milliseconds(100), lockDelay: .milliseconds(100))
     await model.launch()
     guard case .signedOut(let initial) = model.phase else {
       Issue.record("Expected signed out")
       return
     }
     #expect(initial.step == .email)
+    model.setVisible(true)
     model.setEmail(museum.fixture.email)
     await model.submit()
     guard case .signedOut(let prepared) = model.phase else {
@@ -42,10 +44,11 @@ struct AppModelTests {
     }
     #expect(prepared.step == .password)
     await model.submit(museum.fixture.password)
-    guard case .ready(let ready) = model.phase else {
+    guard case .ready(let session) = model.phase else {
       Issue.record("Expected ready after password")
       return
     }
+    let ready = session.state
     #expect(ready.syncStatus == .idle)
     #expect(
       ready.codes.sorted { $0.issuer < $1.issuer }.map(\.current) == [
@@ -64,7 +67,21 @@ struct AppModelTests {
     model.copy()
     #expect(pasteboard.string(forType: .string) == "359152")
     #expect(model.copiedID == model.filteredCodes.first?.id)
-    try await Task.sleep(for: .milliseconds(1300))
+    #expect(
+      pasteboard.types?.contains(NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+        == true)
+    #expect(
+      pasteboard.types?.contains(NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+        == true)
+    try await Task.sleep(for: .milliseconds(150))
+    #expect(pasteboard.string(forType: .string) == nil)
+    model.copy()
+    #expect(pasteboard.string(forType: .string) == "359152")
+    pasteboard.clearContents()
+    pasteboard.setString("359152", forType: .string)
+    try await Task.sleep(for: .milliseconds(150))
+    #expect(pasteboard.string(forType: .string) == "359152")
+    try await Task.sleep(for: .milliseconds(1100))
     #expect(model.copiedID == nil)
     model.search = "no such issuer"
     #expect(model.filteredCodes.isEmpty)
@@ -75,7 +92,7 @@ struct AppModelTests {
     #expect(model.selectedID == ready.codes.first { $0.issuer == "RFC" }?.id)
     let savedSession = try #require(try sessionStore.load())
     let savedCache = try #require(try cacheStore.load())
-    model.signOut()
+    await model.signOut()
     #expect(try sessionStore.load() == nil)
     #expect(try cacheStore.load() == nil)
     guard case .signedOut(let signedOut) = model.phase else {
@@ -90,32 +107,131 @@ struct AppModelTests {
     instant = Date(timeIntervalSince1970: 59)
     let relaunched = AppModel(
       config: config, sessionStore: sessionStore, cacheStore: cacheStore,
-      pasteboard: pasteboard, now: { instant })
+      pasteboard: pasteboard, now: { instant }, lockDelay: .milliseconds(100))
     await relaunched.launch()
-    guard case .ready(let cached) = relaunched.phase else {
-      Issue.record("Expected immediate cached codes")
+    guard case .locked = relaunched.phase else {
+      Issue.record("Expected locked on launch")
       return
     }
-    #expect(cached.codes == ready.codes)
+    #expect(relaunched.filteredCodes.isEmpty)
+    relaunched.setVisible(true)
+    await relaunched.unlock()
+    guard case .ready(let cached) = relaunched.phase else {
+      Issue.record("Expected cached codes before network sync")
+      return
+    }
+    #expect(cached.state.codes == ready.codes)
     for _ in 0..<200 {
-      if case .ready(let state) = relaunched.phase, case .offline = state.syncStatus { break }
+      if case .ready(let state) = relaunched.phase, case .offline = state.state.syncStatus { break }
       try await Task.sleep(for: .milliseconds(100))
     }
-    guard case .ready(let offline) = relaunched.phase, case .offline = offline.syncStatus else {
+    guard case .ready(let offline) = relaunched.phase, case .offline = offline.state.syncStatus
+    else {
       Issue.record("Expected offline with cached codes after server stops")
       return
     }
-    #expect(offline.codes == ready.codes)
-    #expect(offline.lastSuccessfulSync != nil)
-    relaunched.signOut()
+    #expect(offline.state.codes == ready.codes)
+    #expect(offline.state.lastSuccessfulSync != nil)
+    relaunched.setVisible(true)
+    relaunched.setVisible(false)
+    try await Task.sleep(for: .milliseconds(150))
+    guard case .locked = relaunched.phase else {
+      Issue.record("Expected automatic lock after popover closes")
+      return
+    }
+    #expect(relaunched.filteredCodes.isEmpty)
+    #expect(relaunched.selectedID == nil)
+    relaunched.copy(id: ready.codes.first { $0.issuer == "RFC" }?.id)
+    #expect(pasteboard.string(forType: .string) == "359152")
+    relaunched.setVisible(true)
+    for _ in 0..<200 {
+      if case .ready = relaunched.phase { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    guard case .ready(let reopened) = relaunched.phase else {
+      Issue.record("Expected opening the locked popover to unlock")
+      return
+    }
+    #expect(reopened.state.codes == ready.codes)
+    let observer = LockObserver(model: relaunched)
+    defer { withExtendedLifetime(observer) {} }
+    NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.willSleepNotification, object: nil)
+    for _ in 0..<20 {
+      if case .locked = relaunched.phase { break }
+      await Task.yield()
+    }
+    guard case .locked = relaunched.phase else {
+      Issue.record("Expected system sleep notification to lock")
+      return
+    }
+    #expect(relaunched.filteredCodes.isEmpty)
+    await relaunched.unlock()
+    await relaunched.sync()
+    await relaunched.signOut()
     #expect(try sessionStore.load() == nil)
     #expect(try cacheStore.load() == nil)
+  }
+
+  @Test func revokedSessionExpiresAfterUnlock() async throws {
+    let museum = try LocalMuseum()
+    defer { museum.stop() }
+    let store = SessionStore(
+      service: "dev.entemenubar.EnteMenubar.tests.\(UUID())", protection: .unprotectedForTests)
+    let directory = FileManager.default.temporaryDirectory.appending(
+      path: "EnteMenubar-tests-\(UUID())")
+    let cache = CacheStore(url: directory.appending(path: "cache.bin"))
+    defer {
+      try? store.delete()
+      try? FileManager.default.removeItem(at: directory)
+    }
+    let config = AppModel.configuration(environment: [
+      "ENTE_MENUBAR_API_ORIGIN": museum.fixture.endpoint
+    ])
+    let model = AppModel(config: config, sessionStore: store, cacheStore: cache)
+    await model.launch()
+    model.setEmail(museum.fixture.email)
+    await model.submit()
+    await model.submit(museum.fixture.password)
+    #expect(model.filteredCodes.map(\.issuer) == ["Counter", "Legacy", "RFC", "SHA256", "Steam"])
+    let savedSession = try #require(try store.load())
+    weak let openedVault: Vault? = {
+      guard case .ready(let session) = model.phase else { return nil }
+      return session.vault
+    }()
+    #expect(openedVault != nil)
+    model.lock()
+    #expect(openedVault == nil)
+    #expect(model.filteredCodes.isEmpty)
+    await model.unlock()
+    await model.sync()
+    await model.signOut()
+    #expect(try store.load() == nil)
+    try store.save(savedSession)
+    let restored = AppModel(config: config, sessionStore: store, cacheStore: cache)
+    await restored.launch()
+    guard case .locked = restored.phase else {
+      Issue.record("Expected saved session to start locked")
+      return
+    }
+    await restored.unlock()
+    for _ in 0..<200 {
+      if case .signedOut = restored.phase { break }
+      try await Task.sleep(for: .milliseconds(25))
+    }
+    guard case .signedOut(let expired) = restored.phase else {
+      Issue.record("Expected revoked token to sign out")
+      return
+    }
+    #expect(expired.error == "Your session expired. Sign in again.")
+    #expect(restored.filteredCodes.isEmpty)
+    #expect(try store.load() == nil)
   }
 
   @Test func wrongPasswordStaysAtPasswordWithInlineError() async throws {
     let museum = try LocalMuseum()
     defer { museum.stop() }
-    let store = SessionStore(service: "dev.entemenubar.EnteMenubar.tests.\(UUID())")
+    let store = SessionStore(
+      service: "dev.entemenubar.EnteMenubar.tests.\(UUID())", protection: .unprotectedForTests)
     defer { try? store.delete() }
     let model = AppModel(
       config: AppModel.configuration(environment: [

@@ -14,8 +14,10 @@ public struct PopoverView: View {
         ProgressView("Opening vault…").frame(height: 180)
       case .signedOut(let signIn):
         SignInView(model: model, signIn: signIn)
-      case .ready(let state):
-        VaultView(model: model, state: state)
+      case .locked, .unlocking:
+        LockedView(model: model)
+      case .ready(let session):
+        VaultView(model: model, state: session.state)
       }
     }
     .frame(width: 348)
@@ -30,6 +32,43 @@ public struct PopoverView: View {
       }
     }
     .onDisappear { model.setVisible(false) }
+  }
+}
+
+struct LockedView: View {
+  @Bindable var model: AppModel
+
+  private var unlocking: Bool {
+    if case .unlocking = model.phase { return true }
+    return false
+  }
+
+  var body: some View {
+    VStack(spacing: 14) {
+      Image(systemName: "lock.shield").font(.system(size: 30)).foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+      Text("Ente Auth is locked").font(.system(size: 20, weight: .semibold))
+        .accessibilityAddTraits(.isHeader)
+      Text("Unlock with Touch ID or your Mac password to see codes.")
+        .font(.system(size: 13)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+      if let error = model.unlockError {
+        Text(error).font(.system(size: 12)).foregroundStyle(.red)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      Button {
+        Task { await model.unlock() }
+      } label: {
+        HStack(spacing: 8) {
+          if unlocking { ProgressView().controlSize(.small) }
+          Text("Unlock")
+        }.frame(maxWidth: .infinity)
+      }
+      .buttonStyle(.borderedProminent).controlSize(.large)
+      .keyboardShortcut(.defaultAction).disabled(unlocking)
+      Button("Quit") { NSApplication.shared.terminate(nil) }
+        .buttonStyle(.link).font(.system(size: 12))
+    }
+    .padding(24)
   }
 }
 
@@ -98,7 +137,7 @@ private struct SignInView: View {
       }
       HStack {
         if signIn.step != .email {
-          Button("Use a different email") { model.signOut() }
+          Button("Use a different email") { Task { await model.signOut() } }
         }
         Spacer()
         Button("Quit") { NSApplication.shared.terminate(nil) }.keyboardShortcut("q")
@@ -156,7 +195,7 @@ struct VaultView: View {
   @FocusState private var searchFocused: Bool
 
   var body: some View {
-    let codes = model.filteredCodes
+    let codes = state.filteredCodes(search: model.search)
     let pinned = codes.filter(\.display.pinned)
     let others = codes.filter { !$0.display.pinned }
     let timedCode = codes.filter { $0.kind != .hotp }.min { $0.periodSecs < $1.periodSecs }
@@ -228,7 +267,7 @@ struct VaultView: View {
         }
       }
       Divider()
-      VaultFooter(state: state, count: count, signOut: { model.signOut() })
+      VaultFooter(state: state, count: count, signOut: { Task { await model.signOut() } })
     }
     .onAppear { searchFocused = true }
     .onChange(of: model.visible) { _, visible in if visible { searchFocused = true } }

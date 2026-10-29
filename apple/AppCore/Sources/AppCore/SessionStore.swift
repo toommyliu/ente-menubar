@@ -1,19 +1,45 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 public struct SessionStore: Sendable {
-  public let service: String
+  public enum Protection: Sendable {
+    case userPresence
+    case unprotectedForTests
+  }
 
-  public init(service: String = "dev.entemenubar.EnteMenubar") {
+  public let service: String
+  public let protection: Protection
+
+  public init(service: String = "dev.entemenubar.EnteMenubar", protection: Protection) {
     self.service = service
+    self.protection = protection
   }
 
   private var query: [String: Any] {
-    [
+    var query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
       kSecAttrAccount as String: "session",
     ]
+    if protection == .userPresence {
+      query[kSecUseDataProtectionKeychain as String] = true
+    }
+    return query
+  }
+
+  public func containsSession() throws -> Bool {
+    var request = query
+    request[kSecReturnAttributes as String] = true
+    request[kSecMatchLimit as String] = kSecMatchLimitOne
+    let context = LAContext()
+    context.interactionNotAllowed = true
+    request[kSecUseAuthenticationContext as String] = context
+    let status = SecItemCopyMatching(request as CFDictionary, nil)
+    if status == errSecItemNotFound { return false }
+    if status == errSecInteractionNotAllowed { return true }
+    try check(status)
+    return true
   }
 
   public func load() throws -> Data? {
@@ -29,16 +55,23 @@ public struct SessionStore: Sendable {
   }
 
   public func save(_ session: Data) throws {
-    let update = [kSecValueData as String: session]
-    let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
-    if status == errSecItemNotFound {
-      var request = query
-      request[kSecValueData as String] = session
+    try delete()
+    var request = query
+    request[kSecValueData as String] = session
+    switch protection {
+    case .userPresence:
+      var error: Unmanaged<CFError>?
+      guard
+        let access = SecAccessControlCreateWithFlags(
+          nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, .userPresence, &error)
+      else {
+        throw error?.takeRetainedValue() as Error? ?? StorageError.invalidSession
+      }
+      request[kSecAttrAccessControl as String] = access
+    case .unprotectedForTests:
       request[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-      try check(SecItemAdd(request as CFDictionary, nil))
-    } else {
-      try check(status)
     }
+    try check(SecItemAdd(request as CFDictionary, nil))
   }
 
   public func delete() throws {
@@ -60,5 +93,12 @@ enum StorageError: LocalizedError {
     case .keychain(let status): "Unable to access the saved session. Keychain error \(status)."
     case .invalidSession: "The saved session couldn't be read. Sign in again."
     }
+  }
+
+  var isCancelled: Bool {
+    if case .keychain(let status) = self {
+      return status == errSecUserCanceled || status == errSecAuthFailed
+    }
+    return false
   }
 }
