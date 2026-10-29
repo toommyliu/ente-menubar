@@ -79,6 +79,7 @@ public final class AppModel {
     return requestingWebsiteAccess
   }
   private(set) var context: ForegroundContext?
+  private var openedFrom: ApplicationContext?
   private(set) var usage: UsageHistory
   private(set) var usageError: String?
   private var allExpanded = false
@@ -415,6 +416,7 @@ public final class AppModel {
       frozenUsage = usage
       search = ""
       allExpanded = false
+      openedFrom = contextProvider.application
       refreshContext()
       refreshCodes()
       selectFirst()
@@ -557,7 +559,7 @@ public final class AppModel {
 
   private func refreshContext() {
     contextTask?.cancel()
-    guard showSuggestions, case .ready = phase, let application = contextProvider.application else {
+    guard showSuggestions, case .ready = phase, let application = openedFrom else {
       context = nil
       return
     }
@@ -566,8 +568,7 @@ public final class AppModel {
     guard websiteSuggestions, application.isBrowser else { return }
     contextTask = Task { [weak self, contextProvider, websiteSuggestions] in
       let result = await contextProvider.context(for: application, websiteSuggestions: websiteSuggestions)
-      guard !Task.isCancelled, let self, self.visible, case .ready = self.phase,
-        contextProvider.application == application else { return }
+      guard !Task.isCancelled, let self, self.visible, case .ready = self.phase else { return }
       self.context = result
       if self.search.isEmpty { self.selectFirst() }
       else { self.preserveSelection() }

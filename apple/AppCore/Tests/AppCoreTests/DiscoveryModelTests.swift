@@ -12,6 +12,7 @@ import Testing
   var access: WebsiteAccess = .allowed
   var answer: WebsiteAccess = .allowed
   var requestDelay: Duration = .zero
+  var promptApplication: ApplicationContext?
   private(set) var requests: [String] = []
   private(set) var settingsOpened = 0
 
@@ -31,6 +32,7 @@ import Testing
 
   func requestWebsiteAccess(for application: ApplicationContext) async {
     requests.append(application.bundleID)
+    if let promptApplication { self.application = promptApplication }
     try? await Task.sleep(for: requestDelay)
     if access == .notAsked { access = answer }
   }
@@ -49,12 +51,13 @@ import Testing
       try? store.delete()
       try? FileManager.default.removeItem(at: directory)
     }
-    let fake = FakeContextProvider(
-      application: ApplicationContext(bundleID: "net.imput.helium", name: "Helium"),
-      hostname: "login.example")
+    let helium = ApplicationContext(bundleID: "net.imput.helium", name: "Helium")
+    let fake = FakeContextProvider(application: helium, hostname: "login.example")
     fake.access = .notAsked
     fake.answer = .allowed
     fake.requestDelay = .milliseconds(100)
+    fake.promptApplication = ApplicationContext(
+      bundleID: "com.apple.UserNotificationCenter", name: "UserNotificationCenter")
     let model = AppModel(
       config: AppModel.configuration(environment: ["ENTE_MENUBAR_API_ORIGIN": museum.fixture.endpoint]),
       sessionStore: store, cacheStore: CacheStore(url: directory.appending(path: "cache.bin")),
@@ -80,7 +83,9 @@ import Testing
     #expect(fake.requests == ["net.imput.helium"])
     #expect(promptsFinished == 1)
     #expect(model.awaitingSystemPrompt == false)
+    #expect(model.context?.application == helium)
     #expect(model.rows.contains { $0.id == .websiteSetup } == false)
+    fake.application = helium
     fake.access = .denied
     model.setVisible(false)
     model.setVisible(true)
