@@ -289,7 +289,7 @@ struct VaultView: View {
       switch row {
       case .header: height + 27
       case .code: height + 42
-      case .more, .showAll, .enableWebsites: height + 32
+      case .more, .showAll, .websiteSetup: height + 32
       }
     })
   }
@@ -322,20 +322,31 @@ struct VaultView: View {
       actionRow("\(count) more for \(label)", row: row)
     case .showAll(let count):
       actionRow("Show \(count) \(count == 1 ? "code" : "codes")", row: row)
-    case .enableWebsites:
-      actionRow("Suggest codes for the website you're on", row: row, quiet: true)
+    case .websiteSetup(let setup):
+      switch setup {
+      case .turnOn:
+        actionRow("Suggest codes for the website you're on", row: row, quiet: true)
+      case .allow(let name):
+        actionRow("Needs access to \(name)", row: row, action: "Allow…")
+          .help("Ente Auth reads the website address from \(name) to suggest codes. Only the hostname is used.")
+      case .openSettings(let name):
+        actionRow("\(name) access is off", row: row, action: "Open Settings")
+          .help("Ente Auth reads the website address from \(name) to suggest codes. Only the hostname is used.")
+      }
     }
   }
 
-  private func actionRow(_ title: String, row: DiscoveryRow, quiet: Bool = false) -> some View {
+  private func actionRow(_ title: String, row: DiscoveryRow, quiet: Bool = false, action: String? = nil) -> some View {
     Button {
       model.activate(row.id)
       searchFocused = true
     } label: {
       HStack(spacing: 4) {
         Text(title).lineLimit(1)
+          .foregroundStyle(quiet || action != nil ? Color.secondary : Color.accentColor)
         Spacer(minLength: 0)
-        if !quiet { Image(systemName: "chevron.right").font(.system(size: 10)) }
+        if let action { Text(action).foregroundStyle(Color.accentColor) }
+        else if !quiet { Image(systemName: "chevron.right").font(.system(size: 10)) }
       }
       .font(.system(size: 11))
       .foregroundStyle(quiet ? Color.secondary : Color.accentColor)

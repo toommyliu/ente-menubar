@@ -61,18 +61,38 @@ public struct ApplicationContext: Equatable, Sendable {
   ]
 }
 
+public enum WebsiteAccess: Equatable, Sendable {
+  case allowed, notAsked, denied
+}
+
 public struct ForegroundContext: Equatable, Sendable {
   public let application: ApplicationContext
   public let hostname: String?
+  public let websiteAccess: WebsiteAccess?
 
-  public init(application: ApplicationContext, hostname: String? = nil) {
+  public init(application: ApplicationContext, hostname: String? = nil, websiteAccess: WebsiteAccess? = nil) {
     self.application = application
     self.hostname = hostname?.lowercased()
+    self.websiteAccess = websiteAccess
   }
 
   var key: String { hostname ?? application.bundleID }
   var label: String { hostname ?? application.name }
   var candidates: [String] { hostname?.components(separatedBy: ".") ?? [application.name] }
+}
+
+enum WebsiteSetup: Equatable {
+  case turnOn, allow(String), openSettings(String)
+}
+
+func websiteSetup(context: ForegroundContext?, websiteSuggestions: Bool) -> WebsiteSetup? {
+  guard let context, context.application.isBrowser else { return nil }
+  guard websiteSuggestions else { return .turnOn }
+  switch context.websiteAccess {
+  case .notAsked: return .allow(context.application.name)
+  case .denied: return .openSettings(context.application.name)
+  case .allowed, nil: return nil
+  }
 }
 
 func normalizedIssuer(_ value: String) -> String {
@@ -168,7 +188,7 @@ enum CodeSection: String, Hashable {
 }
 
 enum DiscoveryRowID: Hashable {
-  case header(CodeSection), code(CodeSection, String), more, showAll, enableWebsites
+  case header(CodeSection), code(CodeSection, String), more, showAll, websiteSetup
 }
 
 enum DiscoveryRow: Identifiable {
@@ -176,7 +196,7 @@ enum DiscoveryRow: Identifiable {
   case code(CodeSection, CodeView)
   case more(Int, String)
   case showAll(Int)
-  case enableWebsites
+  case websiteSetup(WebsiteSetup)
 
   var id: DiscoveryRowID {
     switch self {
@@ -184,7 +204,7 @@ enum DiscoveryRow: Identifiable {
     case .code(let section, let code): .code(section, code.id)
     case .more: .more
     case .showAll: .showAll
-    case .enableWebsites: .enableWebsites
+    case .websiteSetup: .websiteSetup
     }
   }
 
@@ -206,6 +226,7 @@ func discoveryRows(
 ) -> [DiscoveryRow] {
   let visible = codes.filter { !$0.display.trashed }
   let suggestions = showSuggestions ? contextMatches(visible, context: context, usage: usage, now: now) : []
+  let setup = websiteSetup(context: context, websiteSuggestions: websiteSuggestions)
   if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
     let results = contextSearch ? suggestions : rankedCodes(visible, query: query, usage: usage, now: now)
     guard !results.isEmpty else { return [] }
@@ -214,14 +235,14 @@ func discoveryRows(
   }
   var rows: [DiscoveryRow] = []
   var shown: Set<String> = []
-  if showSuggestions && (!suggestions.isEmpty || (context?.application.isBrowser == true && !websiteSuggestions)) {
+  if showSuggestions && (!suggestions.isEmpty || setup != nil) {
     rows.append(.header(.suggested, context.map { "for \($0.label)" }))
     for code in suggestions.prefix(3) {
       rows.append(.code(.suggested, code))
       shown.insert(code.id)
     }
     if suggestions.count > 3, let context { rows.append(.more(suggestions.count - 3, context.label)) }
-    if context?.application.isBrowser == true && !websiteSuggestions { rows.append(.enableWebsites) }
+    if let setup { rows.append(.websiteSetup(setup)) }
   }
   let pinned = visible.filter { $0.display.pinned && !shown.contains($0.id) }.sorted(by: codeAlphabeticalOrder)
   if !pinned.isEmpty {

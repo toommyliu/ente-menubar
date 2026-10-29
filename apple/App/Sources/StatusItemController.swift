@@ -59,7 +59,7 @@ import SwiftUI
     }
     model.configureGlobalShortcut { [weak self] in self?.hotKey.setEnabled($0) }
     model.onClose = { [weak self] in self?.close() }
-    model.onUnlockFinished = { [weak self] in self?.focusPanel() }
+    model.onSystemPromptFinished = { [weak self] in self?.focusPanel() }
   }
 
   @objc private func clicked() {
@@ -107,12 +107,12 @@ import SwiftUI
 
   func windowDidResignKey(_ notification: Notification) {
     model.setOptionHeld(false)
-    if case .unlocking = model.phase { return }
+    if model.awaitingSystemPrompt { return }
     close()
   }
 
   private func dismissForOutsideClick() {
-    if case .unlocking = model.phase { return }
+    if model.awaitingSystemPrompt { return }
     close()
   }
 

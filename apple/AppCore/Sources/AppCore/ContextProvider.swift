@@ -1,9 +1,12 @@
 import AppKit
+import CoreServices
 import Foundation
 
 @MainActor public protocol ContextProvider: AnyObject {
   var application: ApplicationContext? { get }
   func context(for application: ApplicationContext, websiteSuggestions: Bool) async -> ForegroundContext
+  func requestWebsiteAccess(for application: ApplicationContext) async
+  func openWebsiteAccessSettings()
 }
 
 @MainActor public final class LiveContextProvider: NSObject, ContextProvider {
@@ -36,10 +39,36 @@ import Foundation
     guard websiteSuggestions, application.isBrowser else {
       return ForegroundContext(application: application)
     }
-    let hostname = await Task.detached(priority: .userInitiated) {
-      Self.browserHostname(bundleID: application.bundleID)
+    return await Task.detached(priority: .userInitiated) {
+      let access = Self.websiteAccess(bundleID: application.bundleID, ask: false)
+      let hostname = access == .allowed ? Self.browserHostname(bundleID: application.bundleID) : nil
+      return ForegroundContext(application: application, hostname: hostname, websiteAccess: access)
     }.value
-    return ForegroundContext(application: application, hostname: hostname)
+  }
+
+  public func requestWebsiteAccess(for application: ApplicationContext) async {
+    await Task.detached(priority: .userInitiated) {
+      _ = Self.websiteAccess(bundleID: application.bundleID, ask: true)
+    }.value
+  }
+
+  public func openWebsiteAccessSettings() {
+    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Automation")!)
+  }
+
+  private nonisolated static func websiteAccess(bundleID: String, ask: Bool) -> WebsiteAccess? {
+    var target = AEAddressDesc()
+    let status = bundleID.withCString {
+      AECreateDesc(DescType(typeApplicationBundleID), $0, bundleID.utf8.count, &target)
+    }
+    guard status == noErr else { return nil }
+    defer { AEDisposeDesc(&target) }
+    switch AEDeterminePermissionToAutomateTarget(&target, AEEventClass(typeWildCard), AEEventID(typeWildCard), ask) {
+    case noErr: return .allowed
+    case OSStatus(errAEEventWouldRequireUserConsent): return .notAsked
+    case OSStatus(errAEEventNotPermitted): return .denied
+    default: return nil
+    }
   }
 
   private nonisolated static func browserHostname(bundleID: String) -> String? {

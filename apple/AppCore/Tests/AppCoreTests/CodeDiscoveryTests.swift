@@ -112,7 +112,7 @@ struct CodeDiscoveryTests {
     #expect(rows(codes).map(\.id).suffix(1) == [.showAll])
     #expect(rows(codes, expanded: true).compactMap(\.code).count == 16)
     #expect(rows(Array(codes.prefix(15)) + [discoveryCode("trash", "Trash", trashed: true)]).compactMap(\.code).count == 15)
-    #expect(rows(codes).filter(\.selectable).map(\.id).first == .enableWebsites)
+    #expect(rows(codes).filter(\.selectable).map(\.id).first == .websiteSetup)
     let used = [discoveryCode("used", "Zulip", tapCount: 3, lastUsedAt: 1_700_000_000_000)] + codes
     #expect(rows(used).compactMap(\.code).map(\.id) == ["used"])
     #expect(rows(used, expanded: true).compactMap(\.code).map(\.id).filter { $0 == "used" }.count == 1)

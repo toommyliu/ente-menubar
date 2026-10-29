@@ -9,6 +9,11 @@ import Testing
   var application: ApplicationContext?
   var hostname: String?
   var delay: Duration = .zero
+  var access: WebsiteAccess = .allowed
+  var answer: WebsiteAccess = .allowed
+  var requestDelay: Duration = .zero
+  private(set) var requests: [String] = []
+  private(set) var settingsOpened = 0
 
   init(application: ApplicationContext? = nil, hostname: String? = nil) {
     self.application = application
@@ -17,9 +22,20 @@ import Testing
 
   func context(for application: ApplicationContext, websiteSuggestions: Bool) async -> ForegroundContext {
     let host = hostname
+    let access = access
     try? await Task.sleep(for: delay)
-    return ForegroundContext(application: application, hostname: websiteSuggestions ? host : nil)
+    return ForegroundContext(application: application,
+      hostname: websiteSuggestions && access == .allowed ? host : nil,
+      websiteAccess: websiteSuggestions && application.isBrowser ? access : nil)
   }
+
+  func requestWebsiteAccess(for application: ApplicationContext) async {
+    requests.append(application.bundleID)
+    try? await Task.sleep(for: requestDelay)
+    if access == .notAsked { access = answer }
+  }
+
+  func openWebsiteAccessSettings() { settingsOpened += 1 }
 }
 
 @Suite @MainActor struct DiscoveryModelTests {
@@ -52,7 +68,7 @@ import Testing
     await model.submit()
     await model.submit(museum.fixture.password)
     let id = try #require(model.filteredCodes.first { $0.issuer == "RFC" }?.id)
-    #expect(model.rows.first(where: \.selectable)?.id == .enableWebsites)
+    #expect(model.rows.first(where: \.selectable)?.id == .websiteSetup)
     model.activateSelection()
     #expect(model.websiteSuggestions == true)
     #expect(model.context?.hostname == nil)
@@ -121,7 +137,7 @@ import Testing
     model.setEmail(museum.fixture.email)
     await model.submit()
     await model.submit(museum.fixture.password)
-    #expect(model.selectedRowID == .enableWebsites)
+    #expect(model.selectedRowID == .websiteSetup)
     model.moveSelection(1)
     #expect(model.rows.first { $0.id == model.selectedRowID }?.code?.issuer == "Legacy")
     model.moveSelection(-1)
@@ -130,7 +146,7 @@ import Testing
     #expect(await eventually { model.context?.application.bundleID == "net.imput.helium" })
     try await Task.sleep(for: .milliseconds(150))
     #expect(model.context?.hostname == nil)
-    #expect(model.rows.contains { $0.id == .enableWebsites } == false)
+    #expect(model.rows.contains { $0.id == .websiteSetup } == false)
     if case .ready(let session) = model.phase {
       let codes = (1...20).map { index in
         discoveryCode("id-\(index)", index <= 5 ? "GitHub" : "Service \(index)", "account \(index)")

@@ -64,7 +64,7 @@ public final class AppModel {
   public private(set) var globalShortcutEnabled: Bool
   public private(set) var settingsError: String?
   @ObservationIgnored public var onClose: (@MainActor () -> Void)?
-  @ObservationIgnored public var onUnlockFinished: (@MainActor () -> Void)?
+  @ObservationIgnored public var onSystemPromptFinished: (@MainActor () -> Void)?
   public private(set) var loginItemStatus: LoginItemStatus
   public private(set) var codeSampleDate: Date
   private let loginItem: any LoginItemManaging
@@ -73,6 +73,11 @@ public final class AppModel {
   public private(set) var optionHeld = false
   public var codesHidden: Bool { hideCodes && !optionHeld }
   public private(set) var websiteSuggestions: Bool
+  private var requestingWebsiteAccess = false
+  public var awaitingSystemPrompt: Bool {
+    if case .unlocking = phase { return true }
+    return requestingWebsiteAccess
+  }
   private(set) var context: ForegroundContext?
   private(set) var usage: UsageHistory
   private(set) var usageError: String?
@@ -212,13 +217,13 @@ public final class AppModel {
       let vault = try Vault(config: config, session: session, cache: try? cacheStore.load())
       let restored = (try? vault.codes(nowUnixMs: timestamp))?.isEmpty == false
       try open(vault, lastSync: restored ? cacheStore.modifiedAt : nil)
-      onUnlockFinished?()
+      onSystemPromptFinished?()
       Task { await sync() }
     } catch {
       guard case .unlocking(let current) = phase, current == attempt else { return }
       phase = .locked
       if (error as? StorageError)?.isCancelled != true { unlockError = message(error) }
-      onUnlockFinished?()
+      onSystemPromptFinished?()
     }
   }
 
@@ -532,6 +537,24 @@ public final class AppModel {
     refreshContext()
   }
 
+  func allowWebsiteSuggestions() {
+    websiteSuggestions = true
+    preferences.set(true, forKey: websitePreferenceKey)
+    if let application = context?.application, application.isBrowser, !requestingWebsiteAccess {
+      requestingWebsiteAccess = true
+      contextTask?.cancel()
+      Task { [weak self, contextProvider] in
+        await contextProvider.requestWebsiteAccess(for: application)
+        guard let self else { return }
+        self.requestingWebsiteAccess = false
+        self.refreshContext()
+        self.onSystemPromptFinished?()
+      }
+    } else { refreshContext() }
+  }
+
+  func openWebsiteAccessSettings() { contextProvider.openWebsiteAccessSettings() }
+
   private func refreshContext() {
     contextTask?.cancel()
     guard showSuggestions, case .ready = phase, let application = contextProvider.application else {
@@ -578,7 +601,8 @@ public final class AppModel {
     case .showAll:
       allExpanded = true
       selectedRowID = rows.first { if case .code(.all, _) = $0 { true } else { false } }?.id
-    case .enableWebsites: setWebsiteSuggestions(true)
+    case .websiteSetup(.turnOn), .websiteSetup(.allow): allowWebsiteSuggestions()
+    case .websiteSetup(.openSettings): openWebsiteAccessSettings()
     case .header: break
     }
   }
