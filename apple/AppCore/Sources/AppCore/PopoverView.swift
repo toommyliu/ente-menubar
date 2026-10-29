@@ -26,7 +26,7 @@ public struct PopoverView: View {
         case .launching:
           ProgressView("Opening vault…").frame(height: 180).transition(.opacity)
         case .signedOut(let signIn):
-          SignInView(model: model, signIn: signIn).transition(.opacity)
+          SignInView(model: model, signIn: signIn).id(signIn.step).transition(.opacity)
         case .locked, .unlocking:
           LockedView(model: model).transition(.opacity)
         case .ready(let session):
@@ -167,10 +167,6 @@ private struct SignInView: View {
     .padding(22)
     .onAppear { focused = true }
     .onChange(of: model.visible) { _, visible in if visible { focused = true } }
-    .onChange(of: signIn.step) { _, _ in
-      value = ""
-      focused = true
-    }
     .onChange(of: signIn.busy) { _, busy in if !busy { focused = true } }
   }
 
