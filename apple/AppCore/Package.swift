@@ -9,6 +9,7 @@ let package = Package(
   targets: [
     .target(name: "AppCore", dependencies: ["EnteBridge"], resources: [.copy("GeneratedIcons")]),
     .executableTarget(name: "snapshots", dependencies: ["AppCore"]),
+    .executableTarget(name: "context-check", dependencies: ["AppCore"]),
     .testTarget(name: "AppCoreTests", dependencies: ["AppCore", "EnteBridge"]),
   ]
 )
