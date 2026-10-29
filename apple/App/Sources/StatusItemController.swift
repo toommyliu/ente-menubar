@@ -3,6 +3,7 @@ import AppKit
 import SwiftUI
 
 @MainActor final class StatusItemController: NSObject, NSWindowDelegate {
+  private static let revealModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
   private let model: AppModel
   private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
   private let panel = CodePanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -11,6 +12,7 @@ import SwiftUI
   private var localMonitor: Any?
   private var outsideMonitor: Any?
   private var isOpen = false
+  private var optionArmed = false
   private var fadeGeneration = 0
 
   init(model: AppModel) {
@@ -42,8 +44,9 @@ import SwiftUI
       let handled = MainActor.assumeIsolated {
         guard let self, self.isOpen else { return false }
         if event.type == .flagsChanged {
-          let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
-          self.model.setOptionHeld(self.panel.isKeyWindow && modifiers == .option)
+          let modifiers = event.modifierFlags.intersection(Self.revealModifiers)
+          if modifiers.isEmpty { self.optionArmed = true }
+          self.model.setOptionHeld(self.optionArmed && self.panel.isKeyWindow && modifiers == .option)
         } else if event.type == .keyDown, event.window === self.panel {
           if self.accountMenu.handleKeyEquivalent(event) { return true }
         } else if event.type != .keyDown, event.window !== self.panel,
@@ -96,6 +99,7 @@ import SwiftUI
   private func focusPanel() {
     guard isOpen else { return }
     panel.makeKey()
+    optionArmed = NSEvent.modifierFlags.intersection(Self.revealModifiers).isEmpty
     panel.contentView?.layoutSubtreeIfNeeded()
     if let field = panel.contentView.flatMap(Self.firstTextField) { panel.makeFirstResponder(field) }
   }
