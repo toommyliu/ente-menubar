@@ -7,6 +7,33 @@ import Testing
 struct CodeDiscoveryTests {
   private let now = Date(timeIntervalSince1970: 1_700_000_000)
 
+  @Test func websiteSetupReflectsBrowserSettingAndAccess() {
+    let browser = ApplicationContext(bundleID: "net.imput.helium", name: "Helium")
+    let terminal = ApplicationContext(bundleID: "com.apple.Terminal", name: "Terminal")
+    let cases: [(ForegroundContext?, Bool, WebsiteSetup?)] = [
+      (nil, true, nil),
+      (ForegroundContext(application: terminal), false, nil),
+      (ForegroundContext(application: browser), false, .turnOn),
+      (ForegroundContext(application: browser, websiteAccess: .notAsked), true, .allow("Helium")),
+      (ForegroundContext(application: browser, websiteAccess: .denied), true, .openSettings("Helium")),
+      (ForegroundContext(application: browser, websiteAccess: .allowed), true, nil),
+      (ForegroundContext(application: browser), true, nil),
+    ]
+    for (context, enabled, expected) in cases {
+      #expect(websiteSetup(context: context, websiteSuggestions: enabled) == expected)
+    }
+  }
+
+  @Test func deniedWebsiteAccessShowsSetupUnderSuggestedWithoutMatches() {
+    let context = ForegroundContext(
+      application: ApplicationContext(bundleID: "net.imput.helium", name: "Helium"), websiteAccess: .denied)
+    let rows = discoveryRows(codes: [discoveryCode("github", "GitHub")], query: "",
+      usage: UsageHistory(), context: context, websiteSuggestions: true, allExpanded: false, now: now)
+    #expect(rows.map(\.id) == [.header(.suggested), .websiteSetup, .header(.all), .code(.all, "github")])
+    if case .websiteSetup(let setup) = rows.dropFirst().first { #expect(setup == .openSettings("Helium")) }
+    else { Issue.record("Expected website setup under Suggested") }
+  }
+
   @Test func everyTokenMustMatchAndFieldsRankBeforeFuzzy() {
     let codes = [
       discoveryCode("stage", "AWS", "staging"),

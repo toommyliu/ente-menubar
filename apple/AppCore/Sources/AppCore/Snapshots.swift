@@ -66,6 +66,10 @@ import SwiftUI
     ("search-result", snapshotVault(large, search: "aws pr"), .light),
     ("website-opt-in", snapshotVault(large,
       context: ForegroundContext(application: browser), websiteSuggestions: false), .light),
+    ("website-access-needed", snapshotVault(large,
+      context: ForegroundContext(application: browser, websiteAccess: .notAsked), websiteSuggestions: true), .light),
+    ("website-access-off", snapshotVault(large,
+      context: ForegroundContext(application: browser, websiteAccess: .denied), websiteSuggestions: true), .light),
   ]
   for (name, view, scheme) in scenes {
     let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)

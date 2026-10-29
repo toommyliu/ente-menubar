@@ -39,6 +39,70 @@ import Testing
 }
 
 @Suite @MainActor struct DiscoveryModelTests {
+  @Test func websiteAccessCanBeAllowedAndRestoredFromSettings() async throws {
+    let museum = try LocalMuseum()
+    defer { museum.stop() }
+    let directory = FileManager.default.temporaryDirectory.appending(path: "website-access-\(UUID())")
+    let store = SessionStore(service: "website-access-\(UUID())", protection: .unprotectedForTests)
+    let preferences = try #require(UserDefaults(suiteName: "website-access-\(UUID())"))
+    defer {
+      try? store.delete()
+      try? FileManager.default.removeItem(at: directory)
+    }
+    let fake = FakeContextProvider(
+      application: ApplicationContext(bundleID: "net.imput.helium", name: "Helium"),
+      hostname: "login.example")
+    fake.access = .notAsked
+    fake.answer = .allowed
+    fake.requestDelay = .milliseconds(100)
+    let model = AppModel(
+      config: AppModel.configuration(environment: ["ENTE_MENUBAR_API_ORIGIN": museum.fixture.endpoint]),
+      sessionStore: store, cacheStore: CacheStore(url: directory.appending(path: "cache.bin")),
+      contextProvider: fake, preferences: preferences)
+    var promptsFinished = 0
+    model.onSystemPromptFinished = { promptsFinished += 1 }
+    await model.launch()
+    model.setVisible(true)
+    model.setEmail(museum.fixture.email)
+    await model.submit()
+    await model.submit(museum.fixture.password)
+    #expect(model.websiteSuggestions == false)
+    #expect(model.rows.first(where: \.selectable)?.id == .websiteSetup)
+    if case .websiteSetup(let setup) = model.rows.first(where: \.selectable) { #expect(setup == .turnOn) }
+    else { Issue.record("Expected website opt-in") }
+    model.activateSelection()
+    #expect(model.websiteSuggestions == true)
+    #expect(model.awaitingSystemPrompt == true)
+    #expect(await eventually { fake.requests == ["net.imput.helium"] })
+    #expect(model.awaitingSystemPrompt == true)
+    #expect(promptsFinished == 0)
+    #expect(await eventually { model.context?.hostname == "login.example" })
+    #expect(fake.requests == ["net.imput.helium"])
+    #expect(promptsFinished == 1)
+    #expect(model.awaitingSystemPrompt == false)
+    #expect(model.rows.contains { $0.id == .websiteSetup } == false)
+    fake.access = .denied
+    model.setVisible(false)
+    model.setVisible(true)
+    #expect(await eventually { model.context?.websiteAccess == .denied })
+    #expect(model.context?.hostname == nil)
+    #expect(model.rows.first(where: \.selectable)?.id == .websiteSetup)
+    if case .websiteSetup(let setup) = model.rows.first(where: \.selectable) {
+      #expect(setup == .openSettings("Helium"))
+    } else { Issue.record("Expected website access settings") }
+    model.activateSelection()
+    #expect(fake.settingsOpened == 1)
+    #expect(fake.requests == ["net.imput.helium"])
+    #expect(promptsFinished == 1)
+    fake.access = .allowed
+    model.setVisible(false)
+    model.setVisible(true)
+    #expect(await eventually { model.context?.hostname == "login.example" })
+    #expect(model.rows.contains { $0.id == .websiteSetup } == false)
+    #expect(model.awaitingSystemPrompt == false)
+    await model.signOut()
+  }
+
   @Test func copyingLearnsWebsiteAndAppPersistsUsageAndSuggestsOnNextOpen() async throws {
     let museum = try LocalMuseum()
     defer { museum.stop() }
