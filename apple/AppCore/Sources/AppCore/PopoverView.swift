@@ -328,12 +328,9 @@ struct CodeRow: View {
   var body: some View {
     Button(action: copy) {
       HStack(spacing: 10) {
-        Text(String((code.issuer.isEmpty ? code.account : code.issuer).prefix(1)).uppercased())
-          .font(.system(size: 12, weight: .bold))
-          .frame(width: 26, height: 26)
-          .foregroundStyle(.white)
-          .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 7))
-          .accessibilityHidden(true)
+        ServiceIconTile(
+          issuer: code.issuer, account: code.account,
+          iconSrc: code.display.iconSrc, iconID: code.display.iconId)
         VStack(alignment: .leading, spacing: 1) {
           Text(code.issuer.isEmpty ? code.account : code.issuer).font(
             .system(size: 13, weight: .semibold))
