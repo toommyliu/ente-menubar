@@ -4,6 +4,7 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_dir"
 ./scripts/bindings.sh release
+./scripts/icons.sh
 /opt/homebrew/bin/xcodegen generate --spec apple/App/project.yml
 xcodebuild -project apple/App/EnteMenubar.xcodeproj -scheme EnteMenubar \
     -allowProvisioningUpdates -configuration Debug -derivedDataPath "$repo_dir/.build/app" \
