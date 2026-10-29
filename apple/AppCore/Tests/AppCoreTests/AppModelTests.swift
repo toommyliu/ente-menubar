@@ -75,6 +75,24 @@ struct AppModelTests {
     #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
     model.search = "rFc"
     #expect(model.filteredCodes.map(\.issuer) == ["RFC"])
+    model.setHideCodes(true)
+    #expect(model.codesHidden == true)
+    model.copy()
+    #expect(pasteboard.string(forType: .string) == "287082")
+    #expect(model.copiedID == model.selectedID)
+    model.copy(moment: .next)
+    #expect(pasteboard.string(forType: .string) == "359152")
+    model.search = "sha256"
+    model.copy(moment: .next)
+    #expect(pasteboard.string(forType: .string) == "30882438")
+    model.search = "steam"
+    model.copy(moment: .next)
+    #expect(pasteboard.string(forType: .string) == "B26KJ")
+    model.search = "counter"
+    model.copy()
+    model.copy(moment: .next)
+    #expect(pasteboard.string(forType: .string) == "B26KJ")
+    model.search = "rfc"
     instant = Date(timeIntervalSince1970: 60)
     model.copy()
     #expect(pasteboard.string(forType: .string) == "359152")

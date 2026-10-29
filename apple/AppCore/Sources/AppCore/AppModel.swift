@@ -57,6 +57,16 @@ public final class AppModel {
   public private(set) var copiedID: String?
   public private(set) var visible = false
   public private(set) var unlockError: String?
+  public private(set) var showSuggestions: Bool
+  public private(set) var globalShortcutEnabled: Bool
+  public private(set) var settingsError: String?
+  public private(set) var loginItemStatus: LoginItemStatus
+  public private(set) var codeSampleDate: Date
+  private let loginItem: any LoginItemManaging
+  private var shortcutRegistration: ((Bool) -> String?)?
+  public private(set) var hideCodes: Bool
+  public private(set) var optionHeld = false
+  public var codesHidden: Bool { hideCodes && !optionHeld }
   public private(set) var websiteSuggestions: Bool
   private(set) var context: ForegroundContext?
   private(set) var usage: UsageHistory
@@ -74,6 +84,9 @@ public final class AppModel {
   private let contextProvider: any ContextProvider
   private let preferences: UserDefaults
   private let websitePreferenceKey: String
+  private let hideCodesPreferenceKey: String
+  private let showSuggestionsPreferenceKey: String
+  private let globalShortcutPreferenceKey: String
   private var login: LoginFlow?
   private var contextTask: Task<Void, Never>?
   private var copiedTask: Task<Void, Never>?
@@ -87,9 +100,12 @@ public final class AppModel {
     sessionStore: SessionStore = SessionStore(protection: .userPresence),
     cacheStore: CacheStore = CacheStore(), pasteboard: NSPasteboard = .general,
     contextProvider: (any ContextProvider)? = nil, preferences: UserDefaults = .standard,
-    now: @escaping () -> Date = Date.init,
+    loginItem: (any LoginItemManaging)? = nil, now: @escaping () -> Date = Date.init,
     clipboardLifetime: Duration = .seconds(30), lockDelay: Duration = .seconds(15 * 60)
   ) {
+    self.loginItem = loginItem ?? SystemLoginItem()
+    loginItemStatus = self.loginItem.status
+    codeSampleDate = now()
     self.config = config
     self.sessionStore = sessionStore
     self.cacheStore = cacheStore
@@ -97,6 +113,12 @@ public final class AppModel {
     self.now = now
     self.contextProvider = contextProvider ?? LiveContextProvider()
     self.preferences = preferences
+    showSuggestionsPreferenceKey = "showSuggestions.\(cacheStore.url.deletingLastPathComponent().path)"
+    showSuggestions = preferences.object(forKey: showSuggestionsPreferenceKey) as? Bool ?? true
+    globalShortcutPreferenceKey = "globalShortcut.\(cacheStore.url.deletingLastPathComponent().path)"
+    globalShortcutEnabled = preferences.object(forKey: globalShortcutPreferenceKey) as? Bool ?? true
+    hideCodesPreferenceKey = "hideCodes.\(cacheStore.url.deletingLastPathComponent().path)"
+    hideCodes = preferences.bool(forKey: hideCodesPreferenceKey)
     websitePreferenceKey = "websiteSuggestions.\(cacheStore.url.deletingLastPathComponent().path)"
     websiteSuggestions = preferences.bool(forKey: websitePreferenceKey)
     usageStore = UsageStore(cacheURL: cacheStore.url)
@@ -108,11 +130,15 @@ public final class AppModel {
   convenience init(
     snapshotPhase: Phase, search: String = "", copiedID: String? = nil,
     snapshotState: VaultState? = nil, context: ForegroundContext? = nil,
-    usage: UsageHistory = UsageHistory(), websiteSuggestions: Bool = true
+    usage: UsageHistory = UsageHistory(), websiteSuggestions: Bool = true,
+    hideCodes: Bool = false, optionHeld: Bool = false, allExpanded: Bool = false
   ) {
     self.init(
       config: Self.configuration(environment: ["ENTE_MENUBAR_API_ORIGIN": "http://127.0.0.1:1"]),
       cacheStore: CacheStore(url: URL(fileURLWithPath: "/dev/null/snapshot/cache.bin")))
+    self.allExpanded = allExpanded
+    self.hideCodes = hideCodes
+    self.optionHeld = optionHeld
     self.phase = snapshotPhase
     self.context = context
     self.usage = usage
@@ -190,6 +216,7 @@ public final class AppModel {
   }
 
   public func lock() {
+    optionHeld = false
     switch phase {
     case .ready, .unlocking:
       phase = .locked
@@ -327,6 +354,7 @@ public final class AppModel {
     case .success(let summary):
       do {
         state.codes = try vault.codes(nowUnixMs: timestamp)
+        codeSampleDate = now()
         let changed =
           summary.upserted + summary.deleted > 0 || summary.unreadable != state.unreadableCount
           || cacheStore.modifiedAt == nil
@@ -354,7 +382,10 @@ public final class AppModel {
       default:
         state.syncStatus = .failed(message(error))
       }
-      state.codes = (try? vault.codes(nowUnixMs: timestamp)) ?? state.codes
+      if let refreshed = try? vault.codes(nowUnixMs: timestamp) {
+        state.codes = refreshed
+        codeSampleDate = now()
+      }
     }
     session.state = state
     phase = .ready(session)
@@ -364,6 +395,7 @@ public final class AppModel {
   public func setVisible(_ visible: Bool) {
     guard self.visible != visible else { return }
     self.visible = visible
+    if visible { refreshLoginItemStatus() }
     lockTask?.cancel()
     if visible {
       search = ""
@@ -373,6 +405,7 @@ public final class AppModel {
       selectFirst()
       if case .locked = phase { Task { await unlock() } }
     } else {
+      optionHeld = false
       contextTask?.cancel()
       scheduleLock()
     }
@@ -392,6 +425,7 @@ public final class AppModel {
     var state = session.state
     do {
       state.codes = try vault.codes(nowUnixMs: timestamp)
+      codeSampleDate = now()
       session.state = state
       phase = .ready(session)
       preserveSelection()
@@ -416,7 +450,64 @@ public final class AppModel {
   func rows(for state: VaultState) -> [DiscoveryRow] {
     discoveryRows(codes: state.codes, query: search, usage: usage, context: context,
       websiteSuggestions: websiteSuggestions, allExpanded: allExpanded, now: now(),
-      contextSearch: contextSearch)
+      contextSearch: contextSearch, showSuggestions: showSuggestions)
+  }
+
+  public func setShowSuggestions(_ enabled: Bool) {
+    showSuggestions = enabled
+    preferences.set(enabled, forKey: showSuggestionsPreferenceKey)
+    contextSearch = false
+    preserveSelection()
+  }
+
+  func dismissSuggestion(id: String) {
+    guard let context, let code = rows.compactMap(\.code).first(where: { $0.id == id }) else { return }
+    usage.dismiss(code, context: context)
+    do {
+      try usageStore.save(usage)
+      usageError = nil
+    } catch { usageError = "Unable to save suggestion preferences." }
+    preserveSelection()
+  }
+
+  public func configureGlobalShortcut(_ registration: @escaping (Bool) -> String?) {
+    shortcutRegistration = registration
+    settingsError = registration(globalShortcutEnabled)
+  }
+
+  public func setGlobalShortcutEnabled(_ enabled: Bool) {
+    if let error = shortcutRegistration?(enabled) {
+      settingsError = error
+      return
+    }
+    settingsError = nil
+    globalShortcutEnabled = enabled
+    preferences.set(enabled, forKey: globalShortcutPreferenceKey)
+  }
+
+  public func refreshLoginItemStatus() { loginItemStatus = loginItem.status }
+
+  public func toggleLaunchAtLogin() {
+    refreshLoginItemStatus()
+    if loginItemStatus == .requiresApproval {
+      loginItem.openSettings()
+      return
+    }
+    do {
+      try loginItem.setEnabled(loginItemStatus != .enabled)
+      settingsError = nil
+    } catch { settingsError = "Unable to change Launch at Login. \(error.localizedDescription)" }
+    refreshLoginItemStatus()
+    if loginItemStatus == .requiresApproval { loginItem.openSettings() }
+  }
+
+  public func setHideCodes(_ enabled: Bool) {
+    hideCodes = enabled
+    preferences.set(enabled, forKey: hideCodesPreferenceKey)
+  }
+
+  public func setOptionHeld(_ held: Bool) {
+    optionHeld = held && visible
   }
 
   public func setWebsiteSuggestions(_ enabled: Bool) {
@@ -476,14 +567,16 @@ public final class AppModel {
     }
   }
 
-  public func copy(id: String? = nil) {
+  public enum CodeMoment { case current, next }
+
+  public func copy(id: String? = nil, moment: CodeMoment = .current) {
     guard case .ready(let session) = phase, let id = id ?? selectedID,
       let code = try? session.vault.codes(nowUnixMs: timestamp).first(where: { $0.id == id }),
       code.kind != .hotp, !code.display.trashed
     else { return }
     if selectedID != id { selectedRowID = rows.first { $0.code?.id == id }?.id }
     let item = NSPasteboardItem()
-    item.setString(code.current, forType: .string)
+    item.setString(moment == .current ? code.current : code.next, forType: .string)
     item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
     item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
     pasteboard.clearContents()
@@ -512,6 +605,7 @@ public final class AppModel {
 
   private func open(_ vault: Vault, lastSync: Date?) throws {
     let codes = try vault.codes(nowUnixMs: timestamp)
+    codeSampleDate = now()
     phase = .ready(
       VaultSession(
         vault: vault,

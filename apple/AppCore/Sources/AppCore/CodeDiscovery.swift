@@ -13,6 +13,7 @@ struct UsageActivity: Codable, Equatable, Sendable {
 struct CodeUsage: Codable, Equatable, Sendable {
   var activity: UsageActivity
   var contexts: [String: UsageActivity] = [:]
+  var dismissedContexts: Set<String>?
 }
 
 struct UsageHistory: Codable, Equatable, Sendable {
@@ -27,9 +28,16 @@ struct UsageHistory: Codable, Equatable, Sendable {
   mutating func record(_ code: CodeView, context: ForegroundContext?, at now: Date) {
     var usage = codes[code.id] ?? CodeUsage(activity: activity(for: code))
     usage.activity = UsageActivity(count: usage.activity.count + 1, lastUsedAt: now)
-    if let key = context?.key {
+    if let key = context?.key, usage.dismissedContexts?.contains(key) != true {
       usage.contexts[key] = UsageActivity(count: (usage.contexts[key]?.count ?? 0) + 1, lastUsedAt: now)
     }
+    codes[code.id] = usage
+  }
+
+  mutating func dismiss(_ code: CodeView, context: ForegroundContext) {
+    var usage = codes[code.id] ?? CodeUsage(activity: activity(for: code))
+    usage.contexts.removeValue(forKey: context.key)
+    usage.dismissedContexts = (usage.dismissedContexts ?? []).union([context.key])
     codes[code.id] = usage
   }
 }
@@ -122,7 +130,7 @@ func contextMatches(
   catalog: IconCatalog = .bundled
 ) -> [CodeView] {
   guard let context else { return [] }
-  let visible = codes.filter { !$0.display.trashed }
+  let visible = codes.filter { !$0.display.trashed && usage.codes[$0.id]?.dismissedContexts?.contains(context.key) != true }
   let learned = visible.compactMap { code -> (CodeView, Double)? in
     guard let activity = usage.codes[code.id]?.contexts[context.key] else { return nil }
     return (code, activity.score(at: now))
@@ -194,10 +202,10 @@ enum DiscoveryRow: Identifiable {
 func discoveryRows(
   codes: [CodeView], query: String, usage: UsageHistory, context: ForegroundContext?,
   websiteSuggestions: Bool, allExpanded: Bool, now: Date,
-  contextSearch: Bool = false
+  contextSearch: Bool = false, showSuggestions: Bool = true
 ) -> [DiscoveryRow] {
   let visible = codes.filter { !$0.display.trashed }
-  let suggestions = contextMatches(visible, context: context, usage: usage, now: now)
+  let suggestions = showSuggestions ? contextMatches(visible, context: context, usage: usage, now: now) : []
   if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
     let results = contextSearch ? suggestions : rankedCodes(visible, query: query, usage: usage, now: now)
     guard !results.isEmpty else { return [] }
@@ -206,7 +214,7 @@ func discoveryRows(
   }
   var rows: [DiscoveryRow] = []
   var shown: Set<String> = []
-  if !suggestions.isEmpty || (context?.application.isBrowser == true && !websiteSuggestions) {
+  if showSuggestions && (!suggestions.isEmpty || (context?.application.isBrowser == true && !websiteSuggestions)) {
     rows.append(.header(.suggested, context.map { "for \($0.label)" }))
     for code in suggestions.prefix(3) {
       rows.append(.code(.suggested, code))
