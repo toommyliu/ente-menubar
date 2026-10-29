@@ -331,7 +331,7 @@ struct VaultView: View {
           .help("Ente Auth reads the website address from \(name) to suggest codes. Only the hostname is used.")
       case .openSettings(let name):
         actionRow("\(name) access is off", row: row, action: "Open Settings")
-          .help("Ente Auth reads the website address from \(name) to suggest codes. Only the hostname is used.")
+          .help("In Automation settings, expand EnteMenubar and turn on \(name).")
       }
     }
   }
@@ -343,13 +343,12 @@ struct VaultView: View {
     } label: {
       HStack(spacing: 4) {
         Text(title).lineLimit(1)
-          .foregroundStyle(quiet || action != nil ? Color.secondary : Color.accentColor)
         Spacer(minLength: 0)
         if let action { Text(action).foregroundStyle(Color.accentColor) }
         else if !quiet { Image(systemName: "chevron.right").font(.system(size: 10)) }
       }
       .font(.system(size: 11))
-      .foregroundStyle(quiet ? Color.secondary : Color.accentColor)
+      .foregroundStyle(quiet || action != nil ? Color.secondary : Color.accentColor)
       .padding(.horizontal, 10)
       .frame(maxWidth: .infinity, minHeight: 32)
       .contentShape(Rectangle())
