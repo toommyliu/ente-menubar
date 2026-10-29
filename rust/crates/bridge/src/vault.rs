@@ -132,6 +132,19 @@ impl Vault {
     }
 
     #[uniffi::method(async_runtime = "tokio")]
+    pub async fn logout(&self) -> Result<(), BridgeError> {
+        self.session
+            .api
+            .post("/users/logout")
+            .json(&serde_json::json!({}))
+            .send()
+            .await?
+            .error_for_code()
+            .await?;
+        Ok(())
+    }
+
+    #[uniffi::method(async_runtime = "tokio")]
     pub async fn sync(&self) -> Result<SyncSummary, BridgeError> {
         let mut key_guard = self.sync_key.lock().await;
         if key_guard.is_none() {

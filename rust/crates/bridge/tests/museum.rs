@@ -4,7 +4,7 @@ use ente_accounts::{AccountsClient, AccountsClientConfig, TwoFactorSetup};
 use ente_bridge::{BridgeError, CodeKind, CodeView, Config, Display, LoginFlow, LoginStep, Vault};
 use ente_core::{
     b64,
-    crypto::{Key, blob},
+    crypto::{Key, blob, kdf, secretbox},
     http::Api,
 };
 use ente_test_support::{
@@ -129,6 +129,18 @@ fn museum() -> TestResult {
             (0, 0, 6)
         );
         let cache = vault.export_cache();
+        let master_key = Key::try_from_slice(&fixture.master_key)?;
+        assert!(secretbox::decrypt_combined(&cache, &master_key).is_err());
+        let cache_key = Key::try_from_slice(&kdf::derive_subkey(
+            &master_key,
+            Key::BYTES,
+            1,
+            b"EMBcache",
+        )?)?;
+        let plaintext = secretbox::decrypt_combined(&cache, &cache_key)?;
+        let cached: serde_json::Value = serde_json::from_slice(&plaintext)?;
+        assert_eq!(cached["version"], 1);
+        assert_eq!(cached["records"].as_object().unwrap().len(), 6);
         let restarted = Vault::new(config(&endpoint), session.clone(), Some(cache.clone()))?;
         assert_eq!(restarted.codes(59_000)?, codes);
         let restored = restarted.sync().await?;
@@ -328,6 +340,11 @@ fn museum() -> TestResult {
         assert_eq!(edge_restored.codes(59_000)?, edge_codes);
         assert_eq!(edge_restored.unreadable_count(), 1);
         assert_eq!(edge_restored.sync().await?.upserted, 0);
+        edge_restored.logout().await?;
+        assert!(matches!(
+            edge_restored.sync().await,
+            Err(BridgeError::Unauthorized)
+        ));
         Ok(())
     })
 }
