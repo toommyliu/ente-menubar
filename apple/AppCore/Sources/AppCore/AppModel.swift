@@ -55,6 +55,9 @@ public final class AppModel {
     return nil
   }
   public private(set) var copiedID: String?
+  public private(set) var copiedNext = false
+  private var frozenUsage: UsageHistory?
+  private var layoutUsage: UsageHistory { frozenUsage ?? usage }
   public private(set) var visible = false
   public private(set) var unlockError: String?
   public private(set) var showSuggestions: Bool
@@ -404,6 +407,7 @@ public final class AppModel {
     if visible { refreshLoginItemStatus() }
     lockTask?.cancel()
     if visible {
+      frozenUsage = usage
       search = ""
       allExpanded = false
       refreshContext()
@@ -411,6 +415,7 @@ public final class AppModel {
       selectFirst()
       if case .locked = phase { Task { await unlock() } }
     } else {
+      frozenUsage = nil
       optionHeld = false
       contextTask?.cancel()
       scheduleLock()
@@ -444,8 +449,8 @@ public final class AppModel {
 
   public var filteredCodes: [CodeView] {
     guard case .ready(let session) = phase else { return [] }
-    if contextSearch { return contextMatches(session.state.codes, context: context, usage: usage, now: now()) }
-    return rankedCodes(session.state.codes, query: search, usage: usage, now: now())
+    if contextSearch { return contextMatches(session.state.codes, context: context, usage: layoutUsage, now: now()) }
+    return rankedCodes(session.state.codes, query: search, usage: layoutUsage, now: now())
   }
 
   var rows: [DiscoveryRow] {
@@ -454,7 +459,7 @@ public final class AppModel {
   }
 
   func rows(for state: VaultState) -> [DiscoveryRow] {
-    discoveryRows(codes: state.codes, query: search, usage: usage, context: context,
+    discoveryRows(codes: state.codes, query: search, usage: layoutUsage, context: context,
       websiteSuggestions: websiteSuggestions, allExpanded: allExpanded, now: now(),
       contextSearch: contextSearch, showSuggestions: showSuggestions)
   }
@@ -470,6 +475,7 @@ public final class AppModel {
   func dismissSuggestion(id: String) {
     guard let context, let code = rows.compactMap(\.code).first(where: { $0.id == id }) else { return }
     usage.dismiss(code, context: context)
+    frozenUsage?.dismiss(code, context: context)
     do {
       try usageStore.save(usage)
       usageError = nil
@@ -603,6 +609,7 @@ public final class AppModel {
       do { try await Task.sleep(for: clipboardLifetime) } catch { return }
       if pasteboard.changeCount == changeCount { pasteboard.clearContents() }
     }
+    copiedNext = moment == .next
     copiedID = id
     copiedTask?.cancel()
     copiedTask = Task { [weak self] in

@@ -7,19 +7,29 @@ public struct PopoverView: View {
 
   public init(model: AppModel) { self.model = model }
 
+  private var phaseKey: Int {
+    switch model.phase {
+    case .launching: 0
+    case .signedOut: 1
+    case .locked, .unlocking: 2
+    case .ready: 3
+    }
+  }
+
   public var body: some View {
     Group {
       switch model.phase {
       case .launching:
-        ProgressView("Opening vault…").frame(height: 180)
+        ProgressView("Opening vault…").frame(height: 180).transition(.opacity)
       case .signedOut(let signIn):
-        SignInView(model: model, signIn: signIn)
+        SignInView(model: model, signIn: signIn).transition(.opacity)
       case .locked, .unlocking:
-        LockedView(model: model)
+        LockedView(model: model).transition(.opacity)
       case .ready(let session):
-        VaultView(model: model, state: session.state)
+        VaultView(model: model, state: session.state).transition(.opacity)
       }
     }
+    .animation(.easeInOut(duration: 0.2), value: phaseKey)
     .frame(width: 348)
     .onExitCommand { model.requestClose() }
     .background(.regularMaterial)
@@ -188,7 +198,6 @@ private struct SignInView: View {
 
   private func submit() {
     let submitted = value
-    value = ""
     Task { await model.submit(submitted) }
   }
 }
@@ -205,7 +214,7 @@ struct VaultView: View {
     VStack(spacing: 0) {
       HStack(spacing: 6) {
         Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
-        TextField("Search \(count) codes", text: $model.search)
+        TextField(count > 0 ? "Search \(count) codes" : "Search codes", text: $model.search)
           .textFieldStyle(.plain)
           .focused($searchFocused)
           .accessibilityLabel("Search codes")
@@ -247,13 +256,19 @@ struct VaultView: View {
         ScrollView {
           VStack(alignment: .leading, spacing: 0) {
             if rows.isEmpty {
-              emptyState
+              if model.search.isEmpty && state.codes.isEmpty && state.lastSuccessfulSync == nil {
+                firstSyncState
+              } else {
+                emptyState
+              }
             } else {
               ForEach(rows) { row in
-                discoveryRow(row).id(row.id)
+                discoveryRow(row).id(row.id).transition(.opacity)
               }
             }
-          }.padding(.horizontal, 6).padding(.bottom, 6)
+          }
+          .padding(.horizontal, 6).padding(.bottom, 6)
+          .animation(.easeOut(duration: 0.15), value: rows.map(\.id))
         }
         .scrollIndicators(.never)
         .frame(height: listHeight(rows))
@@ -295,6 +310,7 @@ struct VaultView: View {
     case .code(let section, let code):
       CodeRow(
         code: code, selected: model.selectedRowID == row.id, copied: model.copiedID == code.id,
+        copiedNext: model.copiedNext,
         copy: {
           model.activate(row.id)
           searchFocused = true
@@ -334,6 +350,25 @@ struct VaultView: View {
     .accessibilityAddTraits(model.selectedRowID == row.id ? [.isSelected] : [])
   }
 
+  private var firstSyncState: some View {
+    VStack(spacing: 8) {
+      switch state.syncStatus {
+      case .offline:
+        Text("Can't reach Ente").font(.system(size: 13, weight: .medium))
+        Text("Your codes appear once you're online.").font(.system(size: 12)).foregroundStyle(.secondary)
+      case .failed(let message):
+        Text("Couldn't load your codes").font(.system(size: 13, weight: .medium))
+        Text(message).font(.system(size: 12)).foregroundStyle(.secondary)
+      case .idle, .syncing:
+        ProgressView().controlSize(.small)
+        Text("Syncing your codes…").font(.system(size: 12)).foregroundStyle(.secondary)
+      }
+    }
+    .multilineTextAlignment(.center)
+    .frame(maxWidth: .infinity, minHeight: 126)
+    .padding(.horizontal, 12)
+  }
+
   private var emptyState: some View {
     VStack(spacing: 8) {
       Text(model.search.isEmpty ? "No codes yet" : "No codes match '\(model.search)'")
@@ -357,6 +392,7 @@ struct CodeRow: View {
   let code: CodeView
   let selected: Bool
   let copied: Bool
+  let copiedNext: Bool
   let copy: () -> Void
   let hover: () -> Void
   let hidden: Bool
@@ -387,16 +423,20 @@ struct CodeRow: View {
               .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.quaternary))
               .help("HOTP codes aren't supported yet")
           } else if copied {
-            Label("Copied", systemImage: "checkmark").font(.system(size: 13, weight: .semibold))
+            Label(copiedNext ? "Copied next" : "Copied", systemImage: "checkmark")
+              .font(.system(size: 13, weight: .semibold))
               .foregroundStyle(.green)
+              .transition(.opacity)
           } else {
             Text(CodePresentation(code.current, hidden: hidden).text).font(.system(size: 17, weight: .semibold)).monospacedDigit()
-            if selected && CodeTiming(code: code).isExpiring {
+            if selected {
               Text("next \(CodePresentation(code.next, hidden: hidden).text)").font(.system(size: 10.5)).monospacedDigit()
-                .foregroundStyle(.secondary)
+                .foregroundStyle(CodeTiming(code: code).isExpiring ? Color.orange : Color.secondary)
             }
           }
-        }.fixedSize(horizontal: false, vertical: true)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .animation(.easeOut(duration: 0.12), value: copied)
       }
       .padding(.horizontal, 10)
       .frame(maxWidth: .infinity, minHeight: 42)

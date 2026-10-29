@@ -132,7 +132,7 @@ func contextMatches(
   guard let context else { return [] }
   let visible = codes.filter { !$0.display.trashed && usage.codes[$0.id]?.dismissedContexts?.contains(context.key) != true }
   let learned = visible.compactMap { code -> (CodeView, Double)? in
-    guard let activity = usage.codes[code.id]?.contexts[context.key] else { return nil }
+    guard let activity = usage.codes[code.id]?.contexts[context.key], activity.count >= 2 else { return nil }
     return (code, activity.score(at: now))
   }
   if !learned.isEmpty {

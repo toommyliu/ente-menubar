@@ -10,6 +10,8 @@ import SwiftUI
   private lazy var hotKey = GlobalShortcut { [weak self] in self?.toggle() }
   private var localMonitor: Any?
   private var outsideMonitor: Any?
+  private var isOpen = false
+  private var fadeGeneration = 0
 
   init(model: AppModel) {
     self.model = model
@@ -32,14 +34,16 @@ import SwiftUI
     panel.hasShadow = true
     panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
     panel.title = "Ente Auth"
-    let host = PopoverHost(rootView: PopoverView(model: model).clipShape(RoundedRectangle(cornerRadius: 10)))
+    let host = PopoverHost(rootView: PopoverView(model: model).clipShape(RoundedRectangle(cornerRadius: 10))
+      .frame(maxHeight: .infinity, alignment: .top))
     panel.contentView = host
     panel.setContentSize(host.fittingSize)
     localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown]) { [weak self] event in
       let handled = MainActor.assumeIsolated {
-        guard let self, self.panel.isVisible else { return false }
+        guard let self, self.isOpen else { return false }
         if event.type == .flagsChanged {
-          self.model.setOptionHeld(self.panel.isKeyWindow && event.modifierFlags.contains(.option))
+          let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+          self.model.setOptionHeld(self.panel.isKeyWindow && modifiers == .option)
         } else if event.type == .keyDown, event.window === self.panel {
           if self.accountMenu.handleKeyEquivalent(event) { return true }
         } else if event.type != .keyDown, event.window !== self.panel,
@@ -68,21 +72,29 @@ import SwiftUI
   }
 
   private func toggle() {
-    if panel.isVisible { close(); return }
+    if isOpen { close(); return }
     guard let button = statusItem.button, let window = button.window else { return }
     let anchor = window.convertToScreen(button.convert(button.bounds, to: nil))
     let screen = window.screen?.visibleFrame ?? anchor
     let size = panel.contentView?.fittingSize ?? NSSize(width: 348, height: 180)
     panel.setFrame(NSRect(x: min(max(anchor.midX - size.width / 2, screen.minX), screen.maxX - size.width),
                           y: anchor.minY - size.height - 5, width: size.width, height: size.height), display: false)
+    fadeGeneration += 1
+    isOpen = true
+    panel.alphaValue = 0
     panel.makeKeyAndOrderFront(nil)
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.12
+      context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+      panel.animator().alphaValue = 1
+    }
     model.setVisible(true)
     model.setOptionHeld(false)
     focusPanel()
   }
 
   private func focusPanel() {
-    guard panel.isVisible else { return }
+    guard isOpen else { return }
     panel.makeKey()
     panel.contentView?.layoutSubtreeIfNeeded()
     if let field = panel.contentView.flatMap(Self.firstTextField) { panel.makeFirstResponder(field) }
@@ -105,9 +117,23 @@ import SwiftUI
   }
 
   private func close() {
-    panel.orderOut(nil)
     model.setOptionHeld(false)
     model.setVisible(false)
+    guard isOpen else { return }
+    isOpen = false
+    fadeGeneration += 1
+    let generation = fadeGeneration
+    NSAnimationContext.runAnimationGroup({ context in
+      context.duration = 0.1
+      context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+      panel.animator().alphaValue = 0
+    }, completionHandler: { [weak self] in
+      MainActor.assumeIsolated {
+        guard let self, self.fadeGeneration == generation else { return }
+        self.panel.orderOut(nil)
+        self.panel.alphaValue = 1
+      }
+    })
   }
 
   func windowShouldClose(_ sender: NSWindow) -> Bool { close(); return false }
@@ -126,14 +152,24 @@ private final class CodePanel: NSPanel {
 }
 
 private final class PopoverHost<Content: View>: NSHostingView<Content> {
+  private var targetSize: NSSize?
+
   override func layout() {
     super.layout()
     guard let window else { return }
     let size = fittingSize
-    if window.frame.size != size {
-      let top = window.frame.maxY
-      window.setContentSize(size)
-      window.setFrameOrigin(NSPoint(x: window.frame.minX, y: top - size.height))
+    guard size != targetSize else { return }
+    let animate = targetSize != nil && window.isVisible
+    targetSize = size
+    let frame = NSRect(x: window.frame.minX, y: window.frame.maxY - size.height, width: size.width, height: size.height)
+    guard animate else {
+      window.setFrame(frame, display: true)
+      return
+    }
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.18
+      context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+      window.animator().setFrame(frame, display: true)
     }
   }
 }
