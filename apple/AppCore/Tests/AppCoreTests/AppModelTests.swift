@@ -7,6 +7,17 @@ import Testing
 
 @Suite @MainActor
 struct AppModelTests {
+  @Test func protectedSessionUsesDataProtectionKeychainWithUserPresence() throws {
+    let request = try SessionStore(service: "test", protection: .userPresence).addRequest(Data([1]))
+    #expect(request[kSecUseDataProtectionKeychain as String] as? Bool == true)
+    #expect(request[kSecAttrAccessControl as String] != nil)
+    #expect(request[kSecAttrAccessible as String] == nil)
+    let unprotected = try SessionStore(service: "test", protection: .unprotectedForTests)
+      .addRequest(Data([1]))
+    #expect(unprotected[kSecUseDataProtectionKeychain as String] == nil)
+    #expect(unprotected[kSecAttrAccessControl as String] == nil)
+  }
+
   @Test func loginCacheCopySignOutAndOfflineRelaunch() async throws {
     let museum = try LocalMuseum()
     defer { museum.stop() }
@@ -73,16 +84,14 @@ struct AppModelTests {
     #expect(
       pasteboard.types?.contains(NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
         == true)
-    try await Task.sleep(for: .milliseconds(150))
-    #expect(pasteboard.string(forType: .string) == nil)
+    #expect(await eventually { pasteboard.string(forType: .string) == nil })
     model.copy()
     #expect(pasteboard.string(forType: .string) == "359152")
     pasteboard.clearContents()
     pasteboard.setString("359152", forType: .string)
-    try await Task.sleep(for: .milliseconds(150))
+    try await Task.sleep(for: .milliseconds(400))
     #expect(pasteboard.string(forType: .string) == "359152")
-    try await Task.sleep(for: .milliseconds(1100))
-    #expect(model.copiedID == nil)
+    #expect(await eventually { model.copiedID == nil })
     model.search = "no such issuer"
     #expect(model.filteredCodes.isEmpty)
     model.search = "alice"
@@ -134,7 +143,10 @@ struct AppModelTests {
     #expect(offline.state.lastSuccessfulSync != nil)
     relaunched.setVisible(true)
     relaunched.setVisible(false)
-    try await Task.sleep(for: .milliseconds(150))
+    _ = await eventually {
+      if case .locked = relaunched.phase { return true }
+      return false
+    }
     guard case .locked = relaunched.phase else {
       Issue.record("Expected automatic lock after popover closes")
       return
@@ -305,4 +317,16 @@ struct AppModelTests {
     try? output.fileHandleForReading.close()
     try? errors.close()
   }
+}
+
+@MainActor private func eventually(
+  within timeout: Duration = .seconds(3), _ condition: () -> Bool
+) async -> Bool {
+  let clock = ContinuousClock()
+  let deadline = clock.now.advanced(by: timeout)
+  while clock.now < deadline {
+    if condition() { return true }
+    try? await Task.sleep(for: .milliseconds(20))
+  }
+  return condition()
 }
