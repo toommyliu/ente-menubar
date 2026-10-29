@@ -83,17 +83,22 @@ import SwiftUI
     panel.setFrame(NSRect(x: min(max(anchor.midX - size.width / 2, screen.minX), screen.maxX - size.width),
                           y: anchor.minY - size.height - 5, width: size.width, height: size.height), display: false)
     fadeGeneration += 1
+    let generation = fadeGeneration
     isOpen = true
     panel.alphaValue = 0
     panel.makeKeyAndOrderFront(nil)
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.12
-      context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-      panel.animator().alphaValue = 1
-    }
     model.setVisible(true)
     model.setOptionHeld(false)
     focusPanel()
+    Task {
+      await model.contextSettled(within: .milliseconds(80))
+      guard fadeGeneration == generation else { return }
+      await NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.12
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        panel.animator().alphaValue = 1
+      }
+    }
   }
 
   private func focusPanel() {

@@ -100,6 +100,7 @@ public final class AppModel {
   private let globalShortcutPreferenceKey: String
   private var login: LoginFlow?
   private var contextTask: Task<Void, Never>?
+  private var contextWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
   private var copiedTask: Task<Void, Never>?
   private var clipboardTask: Task<Void, Never>?
   private var lockTask: Task<Void, Never>?
@@ -235,7 +236,7 @@ public final class AppModel {
     switch phase {
     case .ready, .unlocking:
       phase = .locked
-      contextTask?.cancel()
+      endContextLookup()
       context = nil
       resetSelection()
       lockTask?.cancel()
@@ -326,7 +327,7 @@ public final class AppModel {
   private func clearSession(message: String? = nil) {
     login = nil
     lockTask?.cancel()
-    contextTask?.cancel()
+    endContextLookup()
     context = nil
     usage = UsageHistory()
     usageError = nil
@@ -424,7 +425,7 @@ public final class AppModel {
     } else {
       frozenUsage = nil
       optionHeld = false
-      contextTask?.cancel()
+      endContextLookup()
       scheduleLock()
     }
   }
@@ -544,7 +545,7 @@ public final class AppModel {
     preferences.set(true, forKey: websitePreferenceKey)
     if let application = context?.application, application.isBrowser, !requestingWebsiteAccess {
       requestingWebsiteAccess = true
-      contextTask?.cancel()
+      endContextLookup()
       Task { [weak self, contextProvider] in
         await contextProvider.requestWebsiteAccess(for: application)
         guard let self else { return }
@@ -557,8 +558,27 @@ public final class AppModel {
 
   func openWebsiteAccessSettings() { contextProvider.openWebsiteAccessSettings() }
 
-  private func refreshContext() {
+  public func contextSettled(within cap: Duration) async {
+    guard contextTask != nil else { return }
+    let id = UUID()
+    let timer = Task { [weak self] in
+      do { try await Task.sleep(for: cap) } catch { return }
+      self?.contextWaiters.removeValue(forKey: id)?.resume()
+    }
+    await withCheckedContinuation { contextWaiters[id] = $0 }
+    timer.cancel()
+  }
+
+  private func endContextLookup() {
     contextTask?.cancel()
+    contextTask = nil
+    let waiters = contextWaiters.values
+    contextWaiters = [:]
+    for waiter in waiters { waiter.resume() }
+  }
+
+  private func refreshContext() {
+    endContextLookup()
     guard showSuggestions, case .ready = phase, let application = openedFrom else {
       context = nil
       return
@@ -568,10 +588,13 @@ public final class AppModel {
     guard websiteSuggestions, application.isBrowser else { return }
     contextTask = Task { [weak self, contextProvider, websiteSuggestions] in
       let result = await contextProvider.context(for: application, websiteSuggestions: websiteSuggestions)
-      guard !Task.isCancelled, let self, self.visible, case .ready = self.phase else { return }
-      self.context = result
-      if self.search.isEmpty { self.selectFirst() }
-      else { self.preserveSelection() }
+      guard !Task.isCancelled, let self else { return }
+      if self.visible, case .ready = self.phase {
+        self.context = result
+        if self.search.isEmpty { self.selectFirst() }
+        else { self.preserveSelection() }
+      }
+      self.endContextLookup()
     }
   }
 

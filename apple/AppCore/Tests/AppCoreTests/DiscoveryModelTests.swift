@@ -156,7 +156,9 @@ import Testing
     model.setVisible(false)
     model.setVisible(true)
     #expect(model.search == "")
-    #expect(await eventually { model.context?.hostname == "login.example" })
+    #expect(model.context?.hostname == nil)
+    await model.contextSettled(within: .seconds(1))
+    #expect(model.context?.hostname == "login.example")
     #expect(model.rows.first?.id == .header(.suggested))
     #expect(model.rows.first(where: \.selectable)?.code?.id == id)
     model.search = "rfc"
@@ -245,6 +247,62 @@ import Testing
     model.setVisible(false)
     try await Task.sleep(for: .milliseconds(150))
     #expect(model.context?.hostname == nil)
+    await model.signOut()
+  }
+
+  @Test func openingWaitsForHostnameUntilItLandsTheCapPassesOrThePanelCloses() async throws {
+    let museum = try LocalMuseum()
+    defer { museum.stop() }
+    let directory = FileManager.default.temporaryDirectory.appending(path: "discovery-wait-\(UUID())")
+    let store = SessionStore(service: "discovery-wait-\(UUID())", protection: .unprotectedForTests)
+    let preferences = try #require(UserDefaults(suiteName: "discovery-wait-\(UUID())"))
+    defer {
+      try? store.delete()
+      try? FileManager.default.removeItem(at: directory)
+    }
+    let helium = ApplicationContext(bundleID: "net.imput.helium", name: "Helium")
+    let fake = FakeContextProvider(application: helium, hostname: "github.com")
+    let model = AppModel(
+      config: AppModel.configuration(environment: ["ENTE_MENUBAR_API_ORIGIN": museum.fixture.endpoint]),
+      sessionStore: store, cacheStore: CacheStore(url: directory.appending(path: "cache.bin")),
+      contextProvider: fake, preferences: preferences)
+    await model.launch()
+    model.setEmail(museum.fixture.email)
+    await model.submit()
+    await model.submit(museum.fixture.password)
+    model.setWebsiteSuggestions(true)
+    let clock = ContinuousClock()
+
+    fake.delay = .milliseconds(30)
+    model.setVisible(true)
+    var started = clock.now
+    await model.contextSettled(within: .seconds(5))
+    #expect(clock.now - started < .seconds(2))
+    #expect(model.context == ForegroundContext(application: helium, hostname: "github.com", websiteAccess: .allowed))
+    model.setVisible(false)
+
+    fake.delay = .milliseconds(600)
+    model.setVisible(true)
+    await model.contextSettled(within: .milliseconds(50))
+    #expect(model.context == ForegroundContext(application: helium))
+    #expect(await eventually { model.context?.hostname == "github.com" })
+    model.setVisible(false)
+
+    model.setVisible(true)
+    started = clock.now
+    let waiting = Task { await model.contextSettled(within: .seconds(5)) }
+    try await Task.sleep(for: .milliseconds(20))
+    model.setVisible(false)
+    await waiting.value
+    #expect(clock.now - started < .seconds(2))
+
+    let terminal = ApplicationContext(bundleID: "com.apple.Terminal", name: "Terminal")
+    fake.application = terminal
+    model.setVisible(true)
+    started = clock.now
+    await model.contextSettled(within: .seconds(5))
+    #expect(clock.now - started < .milliseconds(100))
+    #expect(model.context == ForegroundContext(application: terminal))
     await model.signOut()
   }
 }
