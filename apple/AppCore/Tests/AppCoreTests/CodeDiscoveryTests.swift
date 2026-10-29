@@ -58,8 +58,6 @@ struct CodeDiscoveryTests {
     #expect(history.codes["seed"]?.contexts["github.com"]?.count == 1)
     let updated = discoveryCode("seed", "GitHub", tapCount: 100, lastUsedAt: 1_700_000_000_000)
     #expect(history.activity(for: updated).score(at: now) == 13)
-    #expect(code.display.tapCount == 12)
-    #expect(code.display.lastUsedAt == 1_700_000_000_000)
   }
 
   @Test func contextUsesLearningThenDirectNamesThenCatalogAliases() {

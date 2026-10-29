@@ -199,9 +199,8 @@ struct VaultView: View {
   @FocusState private var searchFocused: Bool
 
   var body: some View {
-    let codes = state.filteredCodes(search: model.search)
-    let pinned = codes.filter(\.display.pinned)
-    let others = codes.filter { !$0.display.pinned }
+    let rows = model.rows(for: state)
+    let codes = rows.compactMap(\.code)
     let timedCode = codes.filter { $0.kind != .hotp }.min { $0.periodSecs < $1.periodSecs }
     let count = state.codes.filter { !$0.display.trashed }.count
     VStack(spacing: 0) {
@@ -211,7 +210,7 @@ struct VaultView: View {
           .textFieldStyle(.plain)
           .focused($searchFocused)
           .accessibilityLabel("Search codes")
-          .onSubmit { model.copy() }
+          .onSubmit { model.activateSelection() }
           .onKeyPress(.downArrow) {
             model.moveSelection(1)
             return .handled
@@ -257,46 +256,85 @@ struct VaultView: View {
       ScrollViewReader { proxy in
         ScrollView {
           VStack(alignment: .leading, spacing: 0) {
-            if codes.isEmpty {
+            if rows.isEmpty {
               emptyState
             } else {
-              if !pinned.isEmpty { section("Pinned", codes: pinned) }
-              if !others.isEmpty { section("All codes", codes: others) }
+              ForEach(rows) { row in
+                discoveryRow(row).id(row.id)
+              }
             }
           }.padding(.horizontal, 6).padding(.bottom, 6)
         }
-        .frame(height: listHeight(codes: codes.count, pinned: pinned.count))
-        .onChange(of: model.selectedID) { _, id in
+        .frame(height: listHeight(rows))
+        .onChange(of: model.selectedRowID) { _, id in
           if let id { proxy.scrollTo(id) }
         }
       }
       Divider()
-      VaultFooter(state: state, count: count, signOut: { Task { await model.signOut() } })
+      VaultFooter(model: model, state: state, count: count)
     }
     .onAppear { searchFocused = true }
     .onChange(of: model.visible) { _, visible in if visible { searchFocused = true } }
   }
 
-  private func listHeight(codes: Int, pinned: Int) -> CGFloat {
-    if codes == 0 { return 132 }
-    let sections = (pinned == 0 ? 0 : 1) + (pinned == codes ? 0 : 1)
-    return min(440, CGFloat(codes * 48 + sections * 27 + 6))
+  private func listHeight(_ rows: [DiscoveryRow]) -> CGFloat {
+    if rows.isEmpty { return 132 }
+    return min(440, rows.reduce(CGFloat(6)) { height, row in
+      switch row {
+      case .header: height + 27
+      case .code: height + 48
+      case .more, .showAll, .enableWebsites: height + 32
+      }
+    })
   }
 
-  private func section(_ title: String, codes: [CodeView]) -> some View {
-    VStack(alignment: .leading, spacing: 0) {
-      Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-        .padding(.leading, 10).padding(.top, 9).padding(.bottom, 4)
-        .accessibilityAddTraits(.isHeader)
-      ForEach(codes, id: \.id) { code in
-        CodeRow(
-          code: code, selected: model.selectedID == code.id, copied: model.copiedID == code.id
-        ) {
-          model.copy(id: code.id)
-          searchFocused = true
-        }.id(code.id)
+  @ViewBuilder private func discoveryRow(_ row: DiscoveryRow) -> some View {
+    switch row {
+    case .header(let section, let note):
+      HStack(spacing: 5) {
+        Text(section == .results ? note ?? "Results" : section.rawValue)
+          .font(.system(size: 11, weight: .semibold))
+        if section != .results, let note {
+          Text(note).font(.system(size: 11)).foregroundStyle(.tertiary).lineLimit(1)
+        }
       }
+      .foregroundStyle(.secondary)
+      .padding(.horizontal, 10).padding(.top, 9).padding(.bottom, 4)
+      .accessibilityAddTraits(.isHeader)
+    case .code(_, let code):
+      CodeRow(code: code, selected: model.selectedRowID == row.id, copied: model.copiedID == code.id) {
+        model.activate(row.id)
+        searchFocused = true
+      }
+    case .more(let count, let label):
+      actionRow("\(count) more for \(label)", row: row)
+    case .showAll(let count):
+      actionRow("Show all \(count) codes", row: row)
+    case .enableWebsites:
+      actionRow("Suggest codes for the website you're on", row: row, quiet: true)
     }
+  }
+
+  private func actionRow(_ title: String, row: DiscoveryRow, quiet: Bool = false) -> some View {
+    Button {
+      model.activate(row.id)
+      searchFocused = true
+    } label: {
+      HStack(spacing: 4) {
+        Text(title).lineLimit(1)
+        Spacer(minLength: 0)
+        if !quiet { Image(systemName: "chevron.right").font(.system(size: 10)) }
+      }
+      .font(.system(size: 11))
+      .foregroundStyle(quiet ? Color.secondary : Color.accentColor)
+      .padding(.horizontal, 10)
+      .frame(maxWidth: .infinity, minHeight: 32)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .background(model.selectedRowID == row.id ? Color.accentColor.opacity(0.15) : .clear,
+      in: RoundedRectangle(cornerRadius: 8))
+    .accessibilityAddTraits(model.selectedRowID == row.id ? [.isSelected] : [])
   }
 
   private var emptyState: some View {
@@ -379,15 +417,16 @@ struct CodeRow: View {
 }
 
 struct VaultFooter: View {
+  @Bindable var model: AppModel
   let state: VaultState
   let count: Int
-  let signOut: () -> Void
 
   var body: some View {
     HStack(alignment: .center, spacing: 8) {
       VStack(alignment: .leading, spacing: 4) {
         Text("\(status) · \(count) \(count == 1 ? "code" : "codes")")
         if case .failed(let message) = state.syncStatus { Text(message).foregroundStyle(.red) }
+        if let usageError = model.usageError { Text(usageError) }
         if state.unreadableCount > 0 {
           Text(
             "\(state.unreadableCount) \(state.unreadableCount == 1 ? "entry couldn't" : "entries couldn't") be read"
@@ -399,7 +438,10 @@ struct VaultFooter: View {
       .fixedSize(horizontal: false, vertical: true)
       Spacer(minLength: 0)
       Menu {
-        Button("Sign Out", action: signOut)
+        Toggle("Website suggestions", isOn: Binding(
+          get: { model.websiteSuggestions }, set: model.setWebsiteSuggestions))
+        Divider()
+        Button("Sign Out") { Task { await model.signOut() } }
         Divider()
         Button("Quit") { NSApplication.shared.terminate(nil) }.keyboardShortcut("q")
       } label: {

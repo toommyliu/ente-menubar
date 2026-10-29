@@ -12,12 +12,19 @@ targets:
     sources: [Sources]
     dependencies:
       - package: AppCore
+    entitlements:
+      path: EnteMenubar.entitlements
+      properties:
+        com.apple.security.automation.apple-events: true
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)dev.entemenubar.EnteMenubar
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.entemenubar.EnteMenubar
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_LSUIElement: YES
         INFOPLIST_KEY_CFBundleDisplayName: Ente Auth
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: Suggest authentication codes for the website you are using. Only the hostname is used.
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: EnteMenubar.entitlements
         CODE_SIGN_IDENTITY: Apple Development

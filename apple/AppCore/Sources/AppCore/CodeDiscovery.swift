@@ -123,13 +123,14 @@ func contextMatches(
 ) -> [CodeView] {
   guard let context else { return [] }
   let visible = codes.filter { !$0.display.trashed }
-  let learned = visible.filter { usage.codes[$0.id]?.contexts[context.key] != nil }
+  let learned = visible.compactMap { code -> (CodeView, Double)? in
+    guard let activity = usage.codes[code.id]?.contexts[context.key] else { return nil }
+    return (code, activity.score(at: now))
+  }
   if !learned.isEmpty {
     return learned.sorted {
-      let left = usage.codes[$0.id]!.contexts[context.key]!.score(at: now)
-      let right = usage.codes[$1.id]!.contexts[context.key]!.score(at: now)
-      return left == right ? codeAlphabeticalOrder($0, $1) : left > right
-    }
+      $0.1 == $1.1 ? codeAlphabeticalOrder($0.0, $1.0) : $0.1 > $1.1
+    }.map(\.0)
   }
   let candidates = context.candidates.map(normalizedIssuer).filter { !$0.isEmpty }
   func orderedMatches(_ match: (CodeView, String) -> Bool) -> [CodeView] {
@@ -147,8 +148,8 @@ func contextMatches(
   let direct = orderedMatches { normalizedIssuer($0.issuer) == $1 }
   if !direct.isEmpty { return direct }
   return orderedMatches { code, candidate in
-    catalog.contextIdentity(for: code.issuer) != nil
-      && catalog.contextIdentity(for: code.issuer) == catalog.contextIdentity(for: candidate)
+    guard let identity = catalog.contextIdentity(for: code.issuer) else { return false }
+    return identity == catalog.contextIdentity(for: candidate)
   }
 }
 

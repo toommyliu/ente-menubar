@@ -38,7 +38,7 @@ struct AppModelTests {
     ])
     let model = AppModel(
       config: config, sessionStore: sessionStore, cacheStore: cacheStore,
-      pasteboard: pasteboard, now: { instant },
+      pasteboard: pasteboard, contextProvider: FakeContextProvider(), now: { instant },
       clipboardLifetime: .milliseconds(100), lockDelay: .milliseconds(100))
     await model.launch()
     guard case .signedOut(let initial) = model.phase else {
@@ -66,7 +66,8 @@ struct AppModelTests {
         "", "755224", "287082", "46119246", "PV9M4", "287082",
       ])
     #expect(model.filteredCodes.map(\.issuer) == ["Counter", "Legacy", "RFC", "SHA256", "Steam"])
-    #expect(model.orderedCodes.map(\.issuer) == ["Legacy", "RFC", "Counter", "SHA256", "Steam"])
+    #expect(model.rows.prefix { $0.id != .header(.all) }.compactMap(\.code).map(\.issuer)
+      == ["Legacy", "RFC", "Counter", "SHA256", "Steam"])
     #expect(ready.lastSuccessfulSync == Date(timeIntervalSince1970: 59))
     #expect(try sessionStore.load()?.isEmpty == false)
     #expect(try cacheStore.load()?.isEmpty == false)
@@ -116,7 +117,7 @@ struct AppModelTests {
     instant = Date(timeIntervalSince1970: 59)
     let relaunched = AppModel(
       config: config, sessionStore: sessionStore, cacheStore: cacheStore,
-      pasteboard: pasteboard, now: { instant }, lockDelay: .milliseconds(100))
+      pasteboard: pasteboard, contextProvider: FakeContextProvider(), now: { instant }, lockDelay: .milliseconds(100))
     await relaunched.launch()
     guard case .locked = relaunched.phase else {
       Issue.record("Expected locked on launch")
@@ -199,7 +200,7 @@ struct AppModelTests {
     let config = AppModel.configuration(environment: [
       "ENTE_MENUBAR_API_ORIGIN": museum.fixture.endpoint
     ])
-    let model = AppModel(config: config, sessionStore: store, cacheStore: cache)
+    let model = AppModel(config: config, sessionStore: store, cacheStore: cache, contextProvider: FakeContextProvider())
     await model.launch()
     model.setEmail(museum.fixture.email)
     await model.submit()
@@ -219,7 +220,7 @@ struct AppModelTests {
     await model.signOut()
     #expect(try store.load() == nil)
     try store.save(savedSession)
-    let restored = AppModel(config: config, sessionStore: store, cacheStore: cache)
+    let restored = AppModel(config: config, sessionStore: store, cacheStore: cache, contextProvider: FakeContextProvider())
     await restored.launch()
     guard case .locked = restored.phase else {
       Issue.record("Expected saved session to start locked")
@@ -265,7 +266,7 @@ struct AppModelTests {
   }
 }
 
-@MainActor private final class LocalMuseum {
+@MainActor final class LocalMuseum {
   struct Fixture: Decodable {
     let endpoint: String
     let email: String
@@ -319,7 +320,7 @@ struct AppModelTests {
   }
 }
 
-@MainActor private func eventually(
+@MainActor func eventually(
   within timeout: Duration = .seconds(3), _ condition: () -> Bool
 ) async -> Bool {
   let clock = ContinuousClock()

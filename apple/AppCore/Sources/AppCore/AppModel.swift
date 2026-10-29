@@ -33,21 +33,6 @@ public struct VaultState {
   public var lastSuccessfulSync: Date?
   public var syncStatus: SyncStatus
   public var unreadableCount: UInt64
-
-  func filteredCodes(search: String) -> [CodeView] {
-    let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-    return codes.filter {
-      !$0.display.trashed
-        && (query.isEmpty || $0.issuer.localizedCaseInsensitiveContains(query)
-          || $0.account.localizedCaseInsensitiveContains(query))
-    }.sorted {
-      let issuer = $0.issuer.localizedCaseInsensitiveCompare($1.issuer)
-      if issuer != .orderedSame { return issuer == .orderedAscending }
-      let account = $0.account.localizedCaseInsensitiveCompare($1.account)
-      return account == .orderedSame ? $0.id < $1.id : account == .orderedAscending
-    }
-  }
-
 }
 
 public struct VaultSession {
@@ -59,19 +44,38 @@ public struct VaultSession {
 public final class AppModel {
   public private(set) var phase: Phase = .launching
   public var search = "" {
-    didSet { selectFirst() }
+    didSet {
+      contextSearch = false
+      selectFirst()
+    }
   }
-  public private(set) var selectedID: String?
+  private(set) var selectedRowID: DiscoveryRowID?
+  public var selectedID: String? {
+    if case .code(_, let id) = selectedRowID { return id }
+    return nil
+  }
   public private(set) var copiedID: String?
   public private(set) var visible = false
   public private(set) var unlockError: String?
+  public private(set) var websiteSuggestions: Bool
+  private(set) var context: ForegroundContext?
+  private(set) var usage: UsageHistory
+  private(set) var usageError: String?
+  private var allExpanded = false
+  private var contextSearch = false
+  private var snapshotState: VaultState?
 
   private let config: Config
   private let sessionStore: SessionStore
   private let cacheStore: CacheStore
   private let pasteboard: NSPasteboard
   private let now: () -> Date
+  private let usageStore: UsageStore
+  private let contextProvider: any ContextProvider
+  private let preferences: UserDefaults
+  private let websitePreferenceKey: String
   private var login: LoginFlow?
+  private var contextTask: Task<Void, Never>?
   private var copiedTask: Task<Void, Never>?
   private var clipboardTask: Task<Void, Never>?
   private var lockTask: Task<Void, Never>?
@@ -82,6 +86,7 @@ public final class AppModel {
     config: Config = AppModel.configuration(),
     sessionStore: SessionStore = SessionStore(protection: .userPresence),
     cacheStore: CacheStore = CacheStore(), pasteboard: NSPasteboard = .general,
+    contextProvider: (any ContextProvider)? = nil, preferences: UserDefaults = .standard,
     now: @escaping () -> Date = Date.init,
     clipboardLifetime: Duration = .seconds(30), lockDelay: Duration = .seconds(15 * 60)
   ) {
@@ -90,17 +95,33 @@ public final class AppModel {
     self.cacheStore = cacheStore
     self.pasteboard = pasteboard
     self.now = now
+    self.contextProvider = contextProvider ?? LiveContextProvider()
+    self.preferences = preferences
+    websitePreferenceKey = "websiteSuggestions.\(cacheStore.url.deletingLastPathComponent().path)"
+    websiteSuggestions = preferences.bool(forKey: websitePreferenceKey)
+    usageStore = UsageStore(cacheURL: cacheStore.url)
+    usage = (try? usageStore.load()) ?? UsageHistory()
     self.clipboardLifetime = clipboardLifetime
     self.lockDelay = lockDelay
   }
 
-  convenience init(snapshotPhase: Phase, search: String = "", copiedID: String? = nil) {
+  convenience init(
+    snapshotPhase: Phase, search: String = "", copiedID: String? = nil,
+    snapshotState: VaultState? = nil, context: ForegroundContext? = nil,
+    usage: UsageHistory = UsageHistory(), websiteSuggestions: Bool = true
+  ) {
     self.init(
-      config: Self.configuration(environment: ["ENTE_MENUBAR_API_ORIGIN": "http://127.0.0.1:1"]))
+      config: Self.configuration(environment: ["ENTE_MENUBAR_API_ORIGIN": "http://127.0.0.1:1"]),
+      cacheStore: CacheStore(url: URL(fileURLWithPath: "/dev/null/snapshot/cache.bin")))
     self.phase = snapshotPhase
+    self.context = context
+    self.usage = usage
+    self.websiteSuggestions = websiteSuggestions
+    self.snapshotState = snapshotState
     self.search = search
     self.copiedID = copiedID
-    selectFirst()
+    if let snapshotState { selectedRowID = rows(for: snapshotState).first(where: \.selectable)?.id }
+    else { selectFirst() }
   }
 
   public static func live(
@@ -172,6 +193,8 @@ public final class AppModel {
     switch phase {
     case .ready, .unlocking:
       phase = .locked
+      contextTask?.cancel()
+      context = nil
       resetSelection()
       lockTask?.cancel()
     case .launching, .signedOut, .locked:
@@ -261,6 +284,10 @@ public final class AppModel {
   private func clearSession(message: String? = nil) {
     login = nil
     lockTask?.cancel()
+    contextTask?.cancel()
+    context = nil
+    usage = UsageHistory()
+    usageError = nil
     resetSelection()
     unlockError = nil
     var errors: [String] = []
@@ -268,12 +295,16 @@ public final class AppModel {
     do { try cacheStore.delete() } catch {
       errors.append("Unable to remove the cached vault. \(error.localizedDescription)")
     }
+    do { try usageStore.delete() } catch {
+      errors.append("Unable to remove local code usage. \(error.localizedDescription)")
+    }
     phase = .signedOut(SignIn(error: errors.isEmpty ? message : errors.joined(separator: " ")))
   }
 
   private func resetSelection() {
     search = ""
-    selectedID = nil
+    selectedRowID = nil
+    allExpanded = false
     copiedTask?.cancel()
     copiedID = nil
   }
@@ -335,9 +366,14 @@ public final class AppModel {
     self.visible = visible
     lockTask?.cancel()
     if visible {
+      search = ""
+      allExpanded = false
+      refreshContext()
       refreshCodes()
+      selectFirst()
       if case .locked = phase { Task { await unlock() } }
     } else {
+      contextTask?.cancel()
       scheduleLock()
     }
   }
@@ -368,19 +404,72 @@ public final class AppModel {
 
   public var filteredCodes: [CodeView] {
     guard case .ready(let session) = phase else { return [] }
-    return session.state.filteredCodes(search: search)
+    if contextSearch { return contextMatches(session.state.codes, context: context, usage: usage, now: now()) }
+    return rankedCodes(session.state.codes, query: search, usage: usage, now: now())
   }
 
-  public var orderedCodes: [CodeView] {
-    let codes = filteredCodes
-    return codes.filter(\.display.pinned) + codes.filter { !$0.display.pinned }
+  var rows: [DiscoveryRow] {
+    if case .ready(let session) = phase { return rows(for: session.state) }
+    return snapshotState.map { rows(for: $0) } ?? []
+  }
+
+  func rows(for state: VaultState) -> [DiscoveryRow] {
+    discoveryRows(codes: state.codes, query: search, usage: usage, context: context,
+      websiteSuggestions: websiteSuggestions, allExpanded: allExpanded, now: now(),
+      contextSearch: contextSearch)
+  }
+
+  public func setWebsiteSuggestions(_ enabled: Bool) {
+    websiteSuggestions = enabled
+    preferences.set(enabled, forKey: websitePreferenceKey)
+    refreshContext()
+  }
+
+  private func refreshContext() {
+    contextTask?.cancel()
+    guard case .ready = phase, let application = contextProvider.application else {
+      context = nil
+      return
+    }
+    context = ForegroundContext(application: application)
+    selectFirst()
+    guard websiteSuggestions, application.isBrowser else { return }
+    contextTask = Task { [weak self, contextProvider, websiteSuggestions] in
+      let result = await contextProvider.context(for: application, websiteSuggestions: websiteSuggestions)
+      guard !Task.isCancelled, let self, self.visible, case .ready = self.phase,
+        contextProvider.application == application else { return }
+      self.context = result
+      if self.search.isEmpty { self.selectFirst() }
+      else { self.preserveSelection() }
+    }
   }
 
   public func moveSelection(_ offset: Int) {
-    let codes = orderedCodes
-    guard !codes.isEmpty else { return }
-    let index = codes.firstIndex { $0.id == selectedID } ?? 0
-    selectedID = codes[min(max(index + offset, 0), codes.count - 1)].id
+    let selectable = rows.filter(\.selectable)
+    guard !selectable.isEmpty else { return }
+    let index = selectable.firstIndex { $0.id == selectedRowID } ?? 0
+    selectedRowID = selectable[min(max(index + offset, 0), selectable.count - 1)].id
+  }
+
+  func activateSelection() {
+    if let selectedRowID { activate(selectedRowID) }
+  }
+
+  func activate(_ id: DiscoveryRowID) {
+    guard let row = rows.first(where: { $0.id == id }) else { return }
+    selectedRowID = id
+    switch row {
+    case .code(_, let code): copy(id: code.id)
+    case .more(_, let label):
+      search = label
+      contextSearch = true
+      selectFirst()
+    case .showAll:
+      allExpanded = true
+      selectedRowID = rows.first { if case .code(.all, _) = $0 { true } else { false } }?.id
+    case .enableWebsites: setWebsiteSuggestions(true)
+    case .header: break
+    }
   }
 
   public func copy(id: String? = nil) {
@@ -388,13 +477,19 @@ public final class AppModel {
       let code = try? session.vault.codes(nowUnixMs: timestamp).first(where: { $0.id == id }),
       code.kind != .hotp, !code.display.trashed
     else { return }
-    selectedID = id
+    if selectedID != id { selectedRowID = rows.first { $0.code?.id == id }?.id }
     let item = NSPasteboardItem()
     item.setString(code.current, forType: .string)
     item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
     item.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
     pasteboard.clearContents()
     guard pasteboard.writeObjects([item]) else { return }
+    usage.record(code, context: context, at: now())
+    do {
+      try usageStore.save(usage)
+      usageError = nil
+    } catch { usageError = "Unable to save local code usage." }
+    preserveSelection()
     let changeCount = pasteboard.changeCount
     clipboardTask?.cancel()
     clipboardTask = Task { [pasteboard, clipboardLifetime] in
@@ -419,14 +514,15 @@ public final class AppModel {
         state: VaultState(
           codes: codes, lastSuccessfulSync: lastSync, syncStatus: .idle,
           unreadableCount: vault.unreadableCount())))
+    if visible { refreshContext() }
     selectFirst()
     if !visible { scheduleLock() }
   }
 
-  private func selectFirst() { selectedID = orderedCodes.first?.id }
+  private func selectFirst() { selectedRowID = rows.first(where: \.selectable)?.id }
 
   private func preserveSelection() {
-    if !orderedCodes.contains(where: { $0.id == selectedID }) { selectFirst() }
+    if !rows.contains(where: { $0.id == selectedRowID }) { selectFirst() }
   }
 
   private func message(_ error: Error) -> String {
