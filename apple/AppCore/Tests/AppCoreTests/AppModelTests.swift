@@ -66,7 +66,7 @@ struct AppModelTests {
         "", "755224", "287082", "46119246", "PV9M4", "287082",
       ])
     #expect(model.filteredCodes.map(\.issuer) == ["Counter", "Legacy", "RFC", "SHA256", "Steam"])
-    #expect(model.rows.prefix { $0.id != .header(.all) }.compactMap(\.code).map(\.issuer)
+    #expect(model.rows.compactMap(\.code).map(\.issuer)
       == ["Legacy", "RFC", "Counter", "SHA256", "Steam"])
     #expect(ready.lastSuccessfulSync == Date(timeIntervalSince1970: 59))
     #expect(try sessionStore.load()?.isEmpty == false)

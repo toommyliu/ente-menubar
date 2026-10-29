@@ -88,11 +88,10 @@ struct CodeDiscoveryTests {
     ]
     let rows = discoveryRows(codes: codes, query: "", usage: UsageHistory(), context: website("github.com"),
       websiteSuggestions: true, allExpanded: false, now: now)
-    let upper = rows.prefix { $0.id != .header(.all) }
-    #expect(upper.compactMap(\.code).map(\.id) == ["gh1", "gh2", "gh3", "pin", "frequent", "gh4", "extra"])
+    #expect(rows.compactMap(\.code).map(\.id) == ["gh1", "gh2", "gh3", "pin", "frequent", "gh4", "extra"])
+    #expect(!rows.contains { $0.id == .header(.frequent) })
+    #expect(rows.contains { $0.id == .header(.other) })
     #expect(rows.contains { if case .more(1, "github.com") = $0 { true } else { false } })
-    #expect(rows.filter { if case .code(.all, _) = $0 { true } else { false } }.compactMap(\.code).map(\.id)
-      == ["frequent", "gh1", "gh2", "gh3", "gh4", "pin", "extra"])
     let results = discoveryRows(codes: codes, query: "github.com", usage: UsageHistory(), context: website("github.com"),
       websiteSuggestions: true, allExpanded: false, now: now, contextSearch: true)
     #expect(results.compactMap(\.code).map(\.id) == ["gh1", "gh2", "gh3", "gh4"])
@@ -104,11 +103,16 @@ struct CodeDiscoveryTests {
       discoveryRows(codes: input, query: "", usage: UsageHistory(), context: website("github.com"),
         websiteSuggestions: false, allExpanded: expanded, now: now)
     }
-    #expect(rows(Array(codes.prefix(15))).compactMap(\.code).count == 19)
+    #expect(rows(Array(codes.prefix(15))).compactMap(\.code).count == 15)
+    #expect(rows(Array(codes.prefix(15))).contains { $0.id == .header(.all) })
     #expect(rows(codes).map(\.id).suffix(1) == [.showAll])
-    #expect(rows(codes, expanded: true).compactMap(\.code).count == 20)
-    #expect(rows(Array(codes.prefix(15)) + [discoveryCode("trash", "Trash", trashed: true)]).compactMap(\.code).count == 19)
+    #expect(rows(codes, expanded: true).compactMap(\.code).count == 16)
+    #expect(rows(Array(codes.prefix(15)) + [discoveryCode("trash", "Trash", trashed: true)]).compactMap(\.code).count == 15)
     #expect(rows(codes).filter(\.selectable).map(\.id).first == .enableWebsites)
+    let used = [discoveryCode("used", "Zulip", tapCount: 3, lastUsedAt: 1_700_000_000_000)] + codes
+    #expect(rows(used).compactMap(\.code).map(\.id) == ["used"])
+    #expect(rows(used, expanded: true).compactMap(\.code).map(\.id).filter { $0 == "used" }.count == 1)
+    #expect(rows(used, expanded: true).compactMap(\.code).count == 17)
   }
 
   @Test func usageFileRoundTripsWithPrivatePermissionsNextToCache() throws {

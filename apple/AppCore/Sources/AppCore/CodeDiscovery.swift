@@ -155,6 +155,7 @@ func contextMatches(
 
 enum CodeSection: String, Hashable {
   case suggested = "Suggested", pinned = "Pinned", frequent = "Frequent", all = "All codes"
+  case other = "Other codes"
   case results = "Results"
 }
 
@@ -222,21 +223,30 @@ func discoveryRows(
       shown.insert(code.id)
     }
   }
-  let frequent = visible.filter { !shown.contains($0.id) }.sorted {
-    let left = usage.activity(for: $0).score(at: now)
-    let right = usage.activity(for: $1).score(at: now)
-    return left == right ? codeAlphabeticalOrder($0, $1) : left > right
-  }.prefix(4)
-  if !frequent.isEmpty {
-    rows.append(.header(.frequent, nil))
-    rows += frequent.map { .code(.frequent, $0) }
+  let large = visible.count > 15
+  if large {
+    let frequent = visible.filter {
+      !shown.contains($0.id) && usage.activity(for: $0).score(at: now) > 0
+    }.sorted {
+      let left = usage.activity(for: $0).score(at: now)
+      let right = usage.activity(for: $1).score(at: now)
+      return left == right ? codeAlphabeticalOrder($0, $1) : left > right
+    }.prefix(4)
+    if !frequent.isEmpty {
+      rows.append(.header(.frequent, nil))
+      for code in frequent {
+        rows.append(.code(.frequent, code))
+        shown.insert(code.id)
+      }
+    }
   }
-  if !visible.isEmpty {
-    if visible.count > 15 && !allExpanded {
-      rows.append(.showAll(visible.count))
+  let rest = visible.filter { !shown.contains($0.id) }.sorted(by: codeAlphabeticalOrder)
+  if !rest.isEmpty {
+    if large && !allExpanded {
+      rows.append(.showAll(rest.count))
     } else {
-      rows.append(.header(.all, nil))
-      rows += visible.sorted(by: codeAlphabeticalOrder).map { .code(.all, $0) }
+      rows.append(.header(shown.isEmpty ? .all : .other, nil))
+      rows += rest.map { .code(.all, $0) }
     }
   }
   return rows

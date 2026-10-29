@@ -137,10 +137,10 @@ import Testing
       preview.moveSelection(100)
       #expect(preview.selectedRowID == .showAll)
       preview.activateSelection()
-      #expect(preview.selectedRowID == .code(.all, "id-1"))
-      #expect(preview.rows.filter { if case .code(.all, _) = $0 { true } else { false } }.count == 20)
+      #expect(preview.selectedRowID == .code(.all, "id-4"))
+      #expect(preview.rows.filter { if case .code(.all, _) = $0 { true } else { false } }.count == 17)
       preview.moveSelection(1)
-      #expect(preview.selectedRowID == .code(.all, "id-2"))
+      #expect(preview.selectedRowID == .code(.all, "id-5"))
     } else {
       Issue.record("Expected a ready vault for the keyboard fixture")
     }
