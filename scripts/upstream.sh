@@ -8,7 +8,7 @@ if [ ! -d "$dir/.git" ]; then
   git -C "$dir" init -q
   git -C "$dir" remote add origin https://github.com/ente-io/ente.git
 fi
-git -C "$dir" sparse-checkout set --no-cone '/rust/' '/server/' '/mobile/apps/auth/assets/custom-icons/'
+git -C "$dir" sparse-checkout set --no-cone '/rust/' '/server/' '/mobile/apps/auth/assets/custom-icons/' '/mobile/apps/auth/assets/icons/' '/mobile/apps/auth/macos/Runner/Assets.xcassets/AppIcon.appiconset/'
 if [ "$(git -C "$dir" rev-parse -q --verify HEAD 2>/dev/null)" != "$rev" ]; then
   git -C "$dir" fetch -q --depth 1 --filter=blob:none origin "$rev"
   git -C "$dir" checkout -q --detach FETCH_HEAD

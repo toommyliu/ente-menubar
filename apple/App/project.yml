@@ -9,7 +9,7 @@ targets:
   EnteMenubar:
     type: application
     platform: macOS
-    sources: [Sources]
+    sources: [Sources, Generated]
     dependencies:
       - package: AppCore
     entitlements:
@@ -23,6 +23,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.entemenubar.EnteMenubar
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_LSUIElement: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_CFBundleDisplayName: Ente Auth
         INFOPLIST_KEY_NSAppleEventsUsageDescription: Suggest authentication codes for the website you are using. Only the hostname is used.
         CODE_SIGN_STYLE: Automatic

@@ -31,7 +31,7 @@ struct EnteMenubarApp: App {
     MenuBarExtra {
       PopoverView(model: model)
     } label: {
-      Image(systemName: "lock.shield").accessibilityLabel("Ente Auth")
+      Image("MenuBarIcon").accessibilityLabel("Ente Auth")
     }
     .menuBarExtraStyle(.window)
   }
