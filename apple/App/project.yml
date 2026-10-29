@@ -1,0 +1,24 @@
+name: EnteMenubar
+options:
+  deploymentTarget:
+    macOS: "14.0"
+packages:
+  AppCore:
+    path: ../AppCore
+targets:
+  EnteMenubar:
+    type: application
+    platform: macOS
+    sources: [Sources]
+    dependencies:
+      - package: AppCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.entemenubar.EnteMenubar
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Ente Auth
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: Apple Development
+        SWIFT_VERSION: "6.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
