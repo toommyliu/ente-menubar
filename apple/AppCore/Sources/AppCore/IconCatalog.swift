@@ -22,6 +22,26 @@ struct IconRequest: Equatable {
 struct IconCatalog: Decodable, Sendable {
   let custom: [String: ServiceIcon]
   let simple: [String: ServiceIcon]
+  private let contextNames: [String: ServiceIcon]
+
+  init(custom: [String: ServiceIcon], simple: [String: ServiceIcon]) {
+    self.custom = custom
+    self.simple = simple
+    var names: [String: ServiceIcon] = [:]
+    for source in [simple, custom] {
+      for name in source.keys.sorted() { names[normalizedIssuer(name)] = source[name] }
+    }
+    contextNames = names
+  }
+
+  private enum CodingKeys: CodingKey { case custom, simple }
+
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    self.init(
+      custom: try values.decode([String: ServiceIcon].self, forKey: .custom),
+      simple: try values.decode([String: ServiceIcon].self, forKey: .simple))
+  }
 
   static let bundled: IconCatalog = {
     guard let url = Bundle.module.url(forResource: "catalog", withExtension: "json",
@@ -31,6 +51,10 @@ struct IconCatalog: Decodable, Sendable {
     else { preconditionFailure("Run scripts/icons.sh before building AppCore") }
     return catalog
   }()
+
+  func contextIdentity(for name: String) -> ServiceIcon? {
+    contextNames[normalizedIssuer(name)]
+  }
 
   func match(_ request: IconRequest) -> ServiceIcon? {
     let explicit = !request.iconSrc.isEmpty && !request.iconID.isEmpty
