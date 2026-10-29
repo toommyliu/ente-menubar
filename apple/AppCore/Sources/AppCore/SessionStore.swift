@@ -54,8 +54,22 @@ public struct SessionStore: Sendable {
     return data
   }
 
+  public func deleteLegacyLoginKeychainItem() {
+    guard protection == .userPresence else { return }
+    SecItemDelete(
+      [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: "session",
+      ] as CFDictionary)
+  }
+
   public func save(_ session: Data) throws {
     try delete()
+    try check(SecItemAdd(addRequest(session) as CFDictionary, nil))
+  }
+
+  func addRequest(_ session: Data) throws -> [String: Any] {
     var request = query
     request[kSecValueData as String] = session
     switch protection {
@@ -71,7 +85,7 @@ public struct SessionStore: Sendable {
     case .unprotectedForTests:
       request[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
     }
-    try check(SecItemAdd(request as CFDictionary, nil))
+    return request
   }
 
   public func delete() throws {

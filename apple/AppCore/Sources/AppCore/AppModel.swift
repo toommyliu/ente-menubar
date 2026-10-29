@@ -135,6 +135,7 @@ public final class AppModel {
 
   public func launch() async {
     guard case .launching = phase else { return }
+    sessionStore.deleteLegacyLoginKeychainItem()
     do {
       phase = try sessionStore.containsSession() ? .locked : .signedOut(SignIn())
       if visible, case .locked = phase { await unlock() }
@@ -157,7 +158,8 @@ public final class AppModel {
         return
       }
       let vault = try Vault(config: config, session: session, cache: try? cacheStore.load())
-      try open(vault, lastSync: cacheStore.modifiedAt)
+      let restored = (try? vault.codes(nowUnixMs: timestamp))?.isEmpty == false
+      try open(vault, lastSync: restored ? cacheStore.modifiedAt : nil)
       Task { await sync() }
     } catch {
       guard case .unlocking(let current) = phase, current == attempt else { return }

@@ -65,8 +65,12 @@ struct LockedView: View {
       }
       .buttonStyle(.borderedProminent).controlSize(.large)
       .keyboardShortcut(.defaultAction).disabled(unlocking)
-      Button("Quit") { NSApplication.shared.terminate(nil) }
-        .buttonStyle(.link).font(.system(size: 12))
+      HStack {
+        Button("Sign Out") { Task { await model.signOut() } }
+        Spacer()
+        Button("Quit") { NSApplication.shared.terminate(nil) }
+      }
+      .buttonStyle(.link).font(.system(size: 12)).disabled(unlocking)
     }
     .padding(24)
   }
