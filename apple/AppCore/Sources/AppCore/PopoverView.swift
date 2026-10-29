@@ -137,8 +137,12 @@ private struct SignInView: View {
             }
             VStack(alignment: .leading, spacing: 7) {
               Text("Password").font(.system(size: 12, weight: .medium))
-              PasswordField(text: $password, onSubmit: submit)
+              SecureField("Password", text: $password)
+                // AppKit still suggests saved passwords for nil and .newPassword.
+                .textContentType(.oneTimeCode)
+                .accessibilityLabel("Password")
                 .focused($focused, equals: .password)
+                .onSubmit { submit() }
             }
           } else {
             VStack(alignment: .leading, spacing: 7) {

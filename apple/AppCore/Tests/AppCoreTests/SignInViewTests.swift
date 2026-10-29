@@ -6,7 +6,7 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct SignInViewTests {
-  @Test func focusedPasswordFieldDisablesSuggestions() async throws {
+  @Test func credentialFieldsSupportKeyboardNavigation() async throws {
     _ = NSApplication.shared
     let store = SessionStore(service: "dev.entemenubar.EnteMenubar.tests.\(UUID())", protection: .unprotectedForTests)
     defer { try? store.delete() }
@@ -45,11 +45,9 @@ struct SignInViewTests {
     try #require(await eventually { focusedField(in: window) === email })
     try enter("", in: window)
     try #require(await eventually { focusedField(in: window) === password })
-    #expect(password.contentType == .newPassword)
-    #expect(!password.isAutomaticTextCompletionEnabled)
+    #expect(password.contentType == .oneTimeCode)
     let editor = try #require(password.currentEditor() as? NSTextView)
-    #expect(editor.contentType == .newPassword)
-    #expect(!editor.isAutomaticTextCompletionEnabled)
+    #expect(editor.contentType == .oneTimeCode)
     #expect(window.makeFirstResponder(email))
     model.setEmail("")
     #expect(window.makeFirstResponder(password))
@@ -100,7 +98,10 @@ struct SignInViewTests {
     try enter("wrong password", in: window)
     if emailMFA {
       try #require(await eventually { isEmailCode(model) })
-      try #require(await eventually { focusedField(in: window)?.contentType == .oneTimeCode })
+      try #require(await eventually {
+        focusedField(in: window)?.contentType == .oneTimeCode
+          && !(focusedField(in: window) is NSSecureTextField)
+      })
       try enter("000000", in: window)
       try #require(await eventually {
         if case .signedOut(let signIn) = model.phase { return !signIn.busy && signIn.error != nil }
@@ -108,7 +109,10 @@ struct SignInViewTests {
       })
       #expect(isEmailCode(model))
       await model.resendCode()
-      try #require(await eventually { focusedField(in: window)?.contentType == .oneTimeCode })
+      try #require(await eventually {
+        focusedField(in: window)?.contentType == .oneTimeCode
+          && !(focusedField(in: window) is NSSecureTextField)
+      })
       try enter("123456", in: window)
     }
     try #require(await eventually(within: .seconds(15)) {
@@ -126,7 +130,10 @@ struct SignInViewTests {
     try enter(museum.fixture.password, in: window)
     if emailMFA {
       try #require(await eventually { isEmailCode(model) })
-      try #require(await eventually { focusedField(in: window)?.contentType == .oneTimeCode })
+      try #require(await eventually {
+        focusedField(in: window)?.contentType == .oneTimeCode
+          && !(focusedField(in: window) is NSSecureTextField)
+      })
       try enter("123456", in: window)
     }
     try #require(await eventually(within: .seconds(15)) {

@@ -1,6 +1,5 @@
 import AppCore
 import AppKit
-import Carbon.HIToolbox
 import SwiftUI
 
 @MainActor final class StatusItemController: NSObject, NSWindowDelegate {
@@ -55,17 +54,6 @@ import SwiftUI
             return true
           }
           if self.model.handleKeyPress(KeyCombo(event: event)) { return true }
-          if event.keyCode == UInt16(kVK_Tab),
-            event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
-            case .signedOut = self.model.phase {
-            self.panel.recalculateKeyViewLoop()
-            if event.modifierFlags.contains(.shift) {
-              self.panel.selectPreviousKeyView(nil)
-            } else {
-              self.panel.selectNextKeyView(nil)
-            }
-            return true
-          }
         } else if event.type != .keyDown, event.window !== self.panel,
                   event.window !== self.statusItem.button?.window {
           self.dismissForOutsideClick()
