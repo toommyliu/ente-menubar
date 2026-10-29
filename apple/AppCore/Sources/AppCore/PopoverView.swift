@@ -137,11 +137,8 @@ private struct SignInView: View {
             }
             VStack(alignment: .leading, spacing: 7) {
               Text("Password").font(.system(size: 12, weight: .medium))
-              SecureField("Password", text: $password)
-                .textContentType(nil)
-                .accessibilityLabel("Password")
+              PasswordField(text: $password, onSubmit: submit)
                 .focused($focused, equals: .password)
-                .onSubmit { submit() }
             }
           } else {
             VStack(alignment: .leading, spacing: 7) {

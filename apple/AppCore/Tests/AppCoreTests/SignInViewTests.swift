@@ -6,6 +6,35 @@ import Testing
 
 @Suite(.serialized) @MainActor
 struct SignInViewTests {
+  @Test func focusedPasswordFieldDisablesSuggestions() async throws {
+    _ = NSApplication.shared
+    let model = AppModel(snapshotPhase: .signedOut(SignIn()))
+    let host = NSHostingView(rootView: PopoverView(model: model))
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 348, height: 400),
+      styleMask: .titled, backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = host
+    defer { window.close() }
+    window.alphaValue = 0
+    window.orderBack(nil)
+    host.layoutSubtreeIfNeeded()
+    try #require(await eventually { textFields(in: host).filter { $0.isEditable }.count == 2 })
+    let email = try #require(textFields(in: host).first { $0.isEditable && !($0 is NSSecureTextField) })
+    let password = try #require(textFields(in: host).first { $0 is NSSecureTextField })
+    #expect(window.makeFirstResponder(email))
+    try enter("", in: window)
+    try #require(await eventually { focusedField(in: window) === password })
+    #expect(password.contentType == .newPassword)
+    #expect(!password.isAutomaticTextCompletionEnabled)
+    let editor = try #require(password.currentEditor() as? NSTextView)
+    #expect(editor.contentType == .newPassword)
+    #expect(!editor.isAutomaticTextCompletionEnabled)
+    #expect(window.makeFirstResponder(email))
+    #expect(window.makeFirstResponder(password))
+    try enter("", in: window)
+    try #require(await eventually { focusedField(in: window) === email })
+  }
+
   @Test(arguments: [false, true])
   func credentialsSubmitTogetherAndRetryWithoutLosingEmail(emailMFA: Bool) async throws {
     _ = NSApplication.shared
@@ -37,7 +66,6 @@ struct SignInViewTests {
     let email = try #require(textFields(in: host).first { $0.isEditable && !($0 is NSSecureTextField) })
     let password = try #require(textFields(in: host).first { $0 is NSSecureTextField })
     #expect(email.contentType == nil)
-    #expect(password.contentType == nil)
     #expect(window.makeFirstResponder(email))
     for _ in 0..<2 {
       try enter("", in: window)
