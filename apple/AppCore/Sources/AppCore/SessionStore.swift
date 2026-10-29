@@ -61,6 +61,7 @@ public struct SessionStore: Sendable {
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: service,
         kSecAttrAccount as String: "session",
+        kSecUseDataProtectionKeychain as String: false,
       ] as CFDictionary)
   }
 
