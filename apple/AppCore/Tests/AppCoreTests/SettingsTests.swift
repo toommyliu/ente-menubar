@@ -18,6 +18,22 @@ import Testing
 }
 
 @Suite @MainActor struct SettingsTests {
+  @Test func failedShortcutRegistrationShowsOffAndCloseRequestsReachTheOwner() throws {
+    let suite = "u8-shortcut-\(UUID())"
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let root = FileManager.default.temporaryDirectory.appending(path: suite)
+    let model = AppModel(cacheStore: CacheStore(url: root.appending(path: "cache.bin")),
+      contextProvider: FakeContextProvider(), preferences: preferences, loginItem: TestLoginItem())
+    model.configureGlobalShortcut { _ in "Unable to register ⌥⌘E." }
+    #expect(model.globalShortcutEnabled == false)
+    #expect(model.settingsError == "Unable to register ⌥⌘E.")
+    var closed = 0
+    model.onClose = { closed += 1 }
+    model.requestClose()
+    #expect(closed == 1)
+  }
+
   @Test func maskingKeepsNumericGroupingAndSteamLength() {
     #expect(CodePresentation("123456", hidden: true).text == "••• •••")
     #expect(CodePresentation("12345678", hidden: true).text == "•••• ••••")
