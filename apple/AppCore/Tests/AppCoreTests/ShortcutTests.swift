@@ -1,0 +1,110 @@
+import AppKit
+import Carbon.HIToolbox
+import Foundation
+import Testing
+
+@testable import AppCore
+
+private let k = KeyCode(kVK_ANSI_K), y = KeyCode(kVK_ANSI_Y), j = KeyCode(kVK_ANSI_J), n = KeyCode(kVK_ANSI_N)
+@MainActor private let us = KeyLayout(characters: [.e: "e", .r: "r", .l: "l", .c: "c", .q: "q", k: "k", y: "y", j: "j"])
+@MainActor private let dvorak = KeyLayout(characters: [.e: ".", .r: "p", .l: "n"])
+private let open = KeyCombo(.e, [.option, .command])
+private let sync = KeyCombo(.r, .command)
+private let lock = KeyCombo(.l, .command)
+
+@Suite @MainActor struct ShortcutTests {
+  @Test func defaultShortcutsMatchTodaysKeys() {
+    let keymap = Keymap()
+    #expect(ShortcutAction.allCases.map { keymap.combo(for: $0)?.label(in: us) } == ["⌥⌘E", "⌘↩", "⌘R", "⌘L"])
+    #expect(keymap.isDefault == true)
+    #expect(keymap.action(for: sync) == .syncNow)
+    #expect(keymap.action(for: KeyCombo(.c, .command)) == nil)
+  }
+
+  @Test func labelsFollowTheLayoutAndAppleModifierOrder() {
+    #expect(KeyCombo(.r, [.command, .shift, .option, .control]).label(in: us) == "⌃⌥⇧⌘R")
+    #expect(sync.label(in: dvorak) == "⌘P")
+    #expect(KeyCombo(.escape, .control).label(in: us) == "⌃⎋")
+    #expect(KeyCombo(KeyCode(kVK_Space), .option).label(in: us) == "⌥Space")
+    #expect(KeyCombo(KeyCode(kVK_F5), .command).label(in: us) == "⌘F5")
+  }
+
+  @Test func keyEventsKeepOnlyShortcutModifiers() throws {
+    let event = try #require(NSEvent.keyEvent(
+      with: .keyDown, location: .zero, modifierFlags: [.command, .capsLock, .function, .numericPad],
+      timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "",
+      isARepeat: false, keyCode: UInt16(kVK_UpArrow)))
+    #expect(KeyCombo(event: event) == KeyCombo(KeyCode(kVK_UpArrow), .command))
+  }
+
+  @Test func menuItemsDrawTheBoundShortcut() {
+    let item = NSMenuItem()
+    item.setShortcut(KeyCombo(.return, .command), in: us)
+    #expect(item.keyEquivalent == "\r")
+    #expect(item.keyEquivalentModifierMask == [.command])
+    item.setShortcut(open, in: dvorak)
+    #expect(item.keyEquivalent == ".")
+    #expect(item.keyEquivalentModifierMask == [.option, .command])
+    item.setShortcut(nil, in: us)
+    #expect(item.keyEquivalent == "")
+    #expect(item.keyEquivalentModifierMask == [])
+  }
+
+  @Test func problemMessagesNameTheKeysAndTheOwner() {
+    #expect(ShortcutProblem.needsModifier.message(in: us) == "Shortcuts need ⌘, ⌥, or ⌃.")
+    #expect(ShortcutProblem.reserved(KeyCombo(.c, .command)).message(in: us) == "⌘C copies text in search.")
+    #expect(ShortcutProblem.reserved(KeyCombo(.q, .command)).message(in: us) == "⌘Q quits Ente Auth.")
+    #expect(ShortcutProblem.taken(lock, by: .lock).message(in: us) == "⌘L is already used by Lock.")
+    #expect(ShortcutProblem.unavailable(KeyCombo(k, [.control, .option])).message(in: us)
+      == "Couldn't register ⌃⌥K. Try a different shortcut.")
+  }
+
+
+  @Test func reservedCommandsFollowTheCommandLayout() {
+    let azerty = KeyLayout(characters: [.q: "a", .a: "q"])
+    var keymap = Keymap()
+    #expect(throws: ShortcutProblem.reserved(KeyCombo(.q, .command))) {
+      try keymap.assign(KeyCombo(.q, .command), to: .lock, in: azerty)
+    }
+    #expect(ShortcutProblem.reserved(KeyCombo(.q, .command)).message(in: azerty) == "⌘A selects all text in search.")
+    #expect(throws: ShortcutProblem.reserved(KeyCombo(.a, .command))) {
+      try keymap.assign(KeyCombo(.a, .command), to: .lock, in: azerty)
+    }
+    #expect(ShortcutProblem.reserved(KeyCombo(.a, .command)).message(in: azerty) == "⌘Q quits Ente Auth.")
+    let commandLayout = KeyLayout { key, command in key == .r ? (command ? "c" : "p") : nil }
+    #expect(throws: ShortcutProblem.reserved(sync)) {
+      try keymap.assign(sync, to: .syncNow, in: commandLayout)
+    }
+  }
+
+  @Test func storedOverridesKeepIntentAndDropInvalidEntries() throws {
+    #expect(Keymap(stored: nil) == nil)
+    #expect(Keymap(stored: Data("not json".utf8)) == nil)
+    var stolen = try #require(Keymap(stored: Data(#"{"lock":{"key":15,"modifiers":8}}"#.utf8)))
+    #expect(stolen.combo(for: .lock) == sync)
+    #expect(stolen.combo(for: .syncNow) == nil)
+    try stolen.assign(KeyCombo(k, .command), to: .copyNextCode, in: us)
+    let json = try #require(JSONSerialization.jsonObject(with: stolen.stored) as? [String: Any])
+    #expect(Set(json.keys) == ["lock", "copyNextCode"])
+    #expect(Keymap(stored: stolen.stored) == stolen)
+    let decoded = try #require(Keymap(stored: Data(#"{"unknown":null,"openEnteAuth":null,"copyNextCode":{"key":40,"modifiers":0},"syncNow":{"key":16,"modifiers":8},"lock":{"key":16,"modifiers":8}}"#.utf8)))
+    #expect(decoded.combo(for: .openEnteAuth) == nil)
+    #expect(decoded.combo(for: .copyNextCode) == KeyCombo(.return, .command))
+    #expect(decoded.combo(for: .syncNow) == KeyCombo(y, .command))
+    #expect(decoded.combo(for: .lock) == lock)
+  }
+
+  @Test func assignmentsRejectConflictsAndOwnDefaultRemovesOverride() throws {
+    var keymap = Keymap()
+    #expect(throws: ShortcutProblem.needsModifier) { try keymap.assign(KeyCombo(k, .shift), to: .lock, in: us) }
+    #expect(throws: ShortcutProblem.taken(sync, by: .syncNow)) { try keymap.assign(sync, to: .lock, in: us) }
+    try keymap.assign(KeyCombo(k, .command), to: .lock, in: us)
+    #expect(keymap.action(for: KeyCombo(k, .command)) == .lock)
+    #expect(keymap.action(for: lock) == nil)
+    try keymap.assign(lock, to: .lock, in: us)
+    #expect(keymap.isDefault == true)
+    #expect(String(decoding: keymap.stored, as: UTF8.self) == "{}")
+    keymap.clear(.openEnteAuth)
+    #expect(String(decoding: keymap.stored, as: UTF8.self) == #"{"openEnteAuth":null}"#)
+  }
+}
