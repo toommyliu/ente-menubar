@@ -48,12 +48,17 @@ import SwiftUI
           if modifiers.isEmpty { self.optionArmed = true }
           self.model.setOptionHeld(self.optionArmed && self.panel.isKeyWindow && modifiers == .option)
         } else if event.type == .keyDown, event.window === self.panel {
-          if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-            event.charactersIgnoringModifiers?.lowercased() == "q" {
+          let command = event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
+          let key = event.charactersIgnoringModifiers?.lowercased()
+          if command, key == "q" {
             NSApp.terminate(nil)
             return true
           }
           if self.model.handleKeyPress(KeyCombo(event: event)) { return true }
+          if command, key == "c", !self.searchHasSelectedText, self.model.copySelectedCode() {
+            self.close()
+            return true
+          }
         } else if event.type != .keyDown, event.window !== self.panel,
                   event.window !== self.statusItem.button?.window {
           self.dismissForOutsideClick()
@@ -94,6 +99,10 @@ import SwiftUI
     case .unlocking: break
     case .launching, .signedOut, .ready: open()
     }
+  }
+
+  private var searchHasSelectedText: Bool {
+    ((panel.firstResponder as? NSTextView)?.selectedRange().length ?? 0) > 0
   }
 
   private func open() {

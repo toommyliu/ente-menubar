@@ -192,7 +192,7 @@ struct KeyLayout {
     guard combo.modifiers == .command else { return nil }
     switch character {
     case "a": return "selects all text in search"
-    case "c": return "copies text in search"
+    case "c": return "copies the selected code and closes"
     case "v": return "pastes into search"
     case "x": return "cuts text in search"
     case "z": return "undoes typing in search"

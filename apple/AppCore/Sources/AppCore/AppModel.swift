@@ -765,6 +765,12 @@ public final class AppModel {
 
   public enum CodeMoment { case current, next }
 
+  public func copySelectedCode() -> Bool {
+    guard shortcutEditor == nil, selectedID != nil, case .ready = phase else { return false }
+    copy()
+    return true
+  }
+
   public func copy(id: String? = nil, moment: CodeMoment = .current) {
     guard case .ready(let session) = phase, let id = id ?? selectedID,
       let code = try? session.vault.codes(nowUnixMs: timestamp).first(where: { $0.id == id }),
