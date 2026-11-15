@@ -55,6 +55,16 @@ public enum LoginItemStatus: Equatable {
     add("Suggest Codes for Websites", #selector(websites), checked: model.websiteSuggestions)
     add(model.loginItemStatus == .requiresApproval ? "Launch at Login (Needs Approval…)" : "Launch at Login",
         #selector(login), checked: model.loginItemStatus == .enabled)
+    let autoLock = NSMenuItem(title: "Auto-Lock", action: nil, keyEquivalent: "")
+    autoLock.submenu = NSMenu()
+    for option in AutoLock.allCases {
+      let item = NSMenuItem(title: option.title, action: #selector(setAutoLock(_:)), keyEquivalent: "")
+      item.target = self
+      item.tag = option.rawValue
+      item.state = option == model.autoLock ? .on : .off
+      autoLock.submenu?.addItem(item)
+    }
+    menu.addItem(autoLock)
     add("Keyboard Shortcuts…", #selector(shortcuts))
     menu.addItem(.separator())
     add("Sign Out", #selector(signOut), enabled: signedIn)
@@ -93,6 +103,7 @@ public enum LoginItemStatus: Equatable {
   @objc private func showSuggestions() { model.setShowSuggestions(!model.showSuggestions) }
   @objc private func websites() { model.setWebsiteSuggestions(!model.websiteSuggestions) }
   @objc private func login() { model.toggleLaunchAtLogin() }
+  @objc private func setAutoLock(_ sender: NSMenuItem) { AutoLock(rawValue: sender.tag).map(model.setAutoLock) }
   @objc private func shortcuts() { model.showShortcuts() }
   @objc private func signOut() { Task { await model.signOut() } }
   @objc private func quit() { NSApp.terminate(nil) }
