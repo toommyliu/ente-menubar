@@ -341,7 +341,9 @@ private struct Refused: Error {}
   @Test func openingTheEditorRequestsAnOpenAndPanelKeysAreConsumedInEveryPhase() {
     let m = model()
     var opens = 0
+    var closes = 0
     m.onOpen = { opens += 1 }
+    m.onClose = { closes += 1 }
     m.showShortcuts()
     m.showShortcuts()
     #expect(opens == 2)
@@ -350,7 +352,8 @@ private struct Refused: Error {}
     #expect(m.handleKeyPress(sync) == true)
     #expect(m.handleKeyPress(KeyCombo(.return, .command)) == true)
     #expect(m.handleKeyPress(lock) == true)
-    #expect(m.handleKeyPress(open) == false)
+    #expect(m.handleKeyPress(open) == true)
+    #expect(closes == 1)
     #expect(m.handleKeyPress(KeyCombo(.c, .command)) == false)
   }
 }
