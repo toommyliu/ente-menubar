@@ -8,7 +8,7 @@ import SwiftUI
   private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
   private let panel = CodePanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
   private let accountMenu: AccountMenu
-  private lazy var hotKey = GlobalShortcut { [weak self] in self?.toggle() }
+  private lazy var hotKey = GlobalShortcut { [weak self] in self?.hotKeyPressed() }
   private var localMonitor: Any?
   private var outsideMonitor: Any?
   private var isOpen = false
@@ -81,6 +81,20 @@ import SwiftUI
   }
 
   private func toggle() { if isOpen { close() } else { open() } }
+
+  private func hotKeyPressed() {
+    guard !isOpen else { return close() }
+    switch model.phase {
+    case .locked:
+      Task {
+        await model.unlock()
+        if case .locked = model.phase, model.unlockError == nil { return }
+        open()
+      }
+    case .unlocking: break
+    case .launching, .signedOut, .ready: open()
+    }
+  }
 
   private func open() {
     guard !isOpen else { return }

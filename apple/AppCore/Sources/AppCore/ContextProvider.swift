@@ -27,7 +27,7 @@ import Foundation
   }
 
   private func remember(_ app: NSRunningApplication?) {
-    guard let app, app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+    guard let app, app.activationPolicy == .regular, app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
       let bundleID = app.bundleIdentifier, bundleID != ownBundleID
     else { return }
     application = ApplicationContext(bundleID: bundleID, name: app.localizedName ?? bundleID)
