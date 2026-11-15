@@ -563,13 +563,12 @@ public final class AppModel {
       closeShortcuts()
       return true
     case nil:
-      guard let action = keymap.action(for: press), !action.isGlobal else { return false }
-      guard case .ready = phase else { return true }
+      guard let action = keymap.action(for: press) else { return false }
       switch action {
+      case .openEnteAuth: requestClose()
       case .copyNextCode: copy(moment: .next)
       case .syncNow: Task { await sync() }
-      case .lock: lock()
-      case .openEnteAuth: break
+      case .lock: if case .ready = phase { lock() }
       }
       return true
     }
