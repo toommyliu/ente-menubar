@@ -50,6 +50,7 @@ public final class AppModel {
   public private(set) var phase: Phase = .launching
   public var search = "" {
     didSet {
+      guard search != oldValue else { return }
       contextSearch = false
       selectFirst()
     }
