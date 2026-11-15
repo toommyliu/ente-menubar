@@ -213,6 +213,21 @@ struct AppModelTests {
     }
     #expect(relaunched.filteredCodes.isEmpty)
     await relaunched.unlock()
+    relaunched.setAutoLock(.never)
+    relaunched.setVisible(true)
+    relaunched.setVisible(false)
+    try await Task.sleep(for: .milliseconds(300))
+    guard case .ready = relaunched.phase else {
+      Issue.record("Expected no automatic lock when auto-lock is off")
+      return
+    }
+    relaunched.setAutoLock(.oneMinute)
+    #expect(await eventually {
+      if case .locked = relaunched.phase { return true }
+      return false
+    })
+    relaunched.setAutoLock(.fifteenMinutes)
+    await relaunched.unlock()
     await relaunched.sync()
     await relaunched.signOut()
     #expect(try sessionStore.load() == nil)

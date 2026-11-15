@@ -40,6 +40,22 @@ public struct VaultSession {
   public var state: VaultState
 }
 
+public enum AutoLock: Int, CaseIterable, Sendable {
+  case oneMinute = 1, fiveMinutes = 5, fifteenMinutes = 15, oneHour = 60, never = 0
+
+  var delay: Duration? { self == .never ? nil : .seconds(rawValue * 60) }
+
+  var title: String {
+    switch self {
+    case .oneMinute: "After 1 Minute"
+    case .fiveMinutes: "After 5 Minutes"
+    case .fifteenMinutes: "After 15 Minutes"
+    case .oneHour: "After 1 Hour"
+    case .never: "Only When Mac Sleeps or Locks"
+    }
+  }
+}
+
 enum ShortcutEditor: Equatable {
   case browsing
   case recording(ShortcutAction, problem: ShortcutProblem?)
@@ -79,6 +95,7 @@ public final class AppModel {
   private let loginItem: any LoginItemManaging
   @ObservationIgnored private var globalRegistration: (@MainActor (KeyCombo?) throws -> Void)?
   public private(set) var hideCodes: Bool
+  public private(set) var autoLock: AutoLock
   public private(set) var optionHeld = false
   public var codesHidden: Bool { hideCodes && !optionHeld }
   public private(set) var websiteSuggestions: Bool
@@ -107,6 +124,7 @@ public final class AppModel {
   private let hideCodesPreferenceKey: String
   private let showSuggestionsPreferenceKey: String
   private let keymapPreferenceKey: String
+  private let autoLockPreferenceKey: String
   private var login: LoginFlow?
   private var contextTask: Task<Void, Never>?
   private var contextWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
@@ -114,7 +132,7 @@ public final class AppModel {
   private var clipboardTask: Task<Void, Never>?
   private var lockTask: Task<Void, Never>?
   private let clipboardLifetime: Duration
-  private let lockDelay: Duration
+  private let lockDelay: Duration?
 
   public init(
     config: Config = AppModel.configuration(),
@@ -122,7 +140,7 @@ public final class AppModel {
     cacheStore: CacheStore = CacheStore(), pasteboard: NSPasteboard = .general,
     contextProvider: (any ContextProvider)? = nil, preferences: UserDefaults = .standard,
     loginItem: (any LoginItemManaging)? = nil, now: @escaping () -> Date = Date.init,
-    clipboardLifetime: Duration = .seconds(30), lockDelay: Duration = .seconds(15 * 60)
+    clipboardLifetime: Duration = .seconds(30), lockDelay: Duration? = nil
   ) {
     self.loginItem = loginItem ?? SystemLoginItem()
     loginItemStatus = self.loginItem.status
@@ -139,6 +157,8 @@ public final class AppModel {
     let profile = cacheStore.url.deletingLastPathComponent().path
     keymapPreferenceKey = "shortcuts.\(profile)"
     keymap = Self.loadKeymap(preferences, key: keymapPreferenceKey, legacyKey: "globalShortcut.\(profile)")
+    autoLockPreferenceKey = "autoLock.\(profile)"
+    autoLock = (preferences.object(forKey: autoLockPreferenceKey) as? Int).flatMap(AutoLock.init) ?? .fifteenMinutes
     hideCodesPreferenceKey = "hideCodes.\(cacheStore.url.deletingLastPathComponent().path)"
     hideCodes = preferences.bool(forKey: hideCodesPreferenceKey)
     websitePreferenceKey = "websiteSuggestions.\(cacheStore.url.deletingLastPathComponent().path)"
@@ -480,8 +500,9 @@ public final class AppModel {
 
   private func scheduleLock() {
     lockTask?.cancel()
-    lockTask = Task { [weak self, lockDelay] in
-      do { try await Task.sleep(for: lockDelay) } catch { return }
+    guard let delay = autoLock.delay.map({ lockDelay ?? $0 }) else { return }
+    lockTask = Task { [weak self] in
+      do { try await Task.sleep(for: delay) } catch { return }
       self?.lock()
     }
   }
@@ -655,6 +676,12 @@ public final class AppModel {
     } catch { settingsError = "Unable to change Launch at Login. \(error.localizedDescription)" }
     refreshLoginItemStatus()
     if loginItemStatus == .requiresApproval { loginItem.openSettings() }
+  }
+
+  public func setAutoLock(_ autoLock: AutoLock) {
+    self.autoLock = autoLock
+    preferences.set(autoLock.rawValue, forKey: autoLockPreferenceKey)
+    if !visible, case .ready = phase { scheduleLock() }
   }
 
   public func setHideCodes(_ enabled: Bool) {
