@@ -1,6 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
 import Foundation
+import SwiftUI
 import Testing
 
 @testable import AppCore
@@ -75,7 +76,7 @@ private struct Refused: Error {}
     #expect(KeyCombo(event: event) == KeyCombo(KeyCode(kVK_UpArrow), .command))
   }
 
-  @Test func menuItemsDrawTheBoundShortcut() {
+  @Test func menuItemsDrawTheBoundShortcut() throws {
     let item = NSMenuItem()
     item.setShortcut(KeyCombo(.return, .command), in: us)
     #expect(item.keyEquivalent == "\r")
@@ -86,6 +87,12 @@ private struct Refused: Error {}
     item.setShortcut(nil, in: us)
     #expect(item.keyEquivalent == "")
     #expect(item.keyEquivalentModifierMask == [])
+    let next = try #require(KeyCombo(.return, .command).keyboardShortcut(in: us))
+    #expect(next.key == .return)
+    #expect(next.modifiers == .command)
+    let opening = try #require(open.keyboardShortcut(in: dvorak))
+    #expect(opening.key == KeyEquivalent("."))
+    #expect(opening.modifiers == [.option, .command])
   }
 
   @Test func problemMessagesNameTheKeysAndTheOwner() {
