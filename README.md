@@ -9,7 +9,7 @@ This project is not made by or affiliated with Ente.
 - Signs in with your Ente email and password, plus an email or authenticator code if your account asks for one. Passkeys aren't supported yet.
 - Locks when your Mac sleeps or locks, and 15 minutes after you last opened it. Touch ID or your Mac password unlocks it.
 - Keeps your session in the keychain and your codes in an encrypted cache, so it works offline.
-- Copies a code on click or Return. Clipboard managers skip copied codes, and the app clears them after 30 seconds.
+- Copies a code on click or Return. Command-C copies it and closes the menu. Clipboard managers skip copied codes, and the app clears them after 30 seconds.
 - Hides codes behind dots if you turn on **Hide Codes**. Hold Option to see them.
 - Opens and closes from anywhere with Option-Command-E. If it's locked, the shortcut shows only the Touch ID prompt, then opens. Choose **Keyboard Shortcuts…** in the right-click menu to change it or the Sync Now, Lock, and Copy Next Code shortcuts, or to clear one and turn it off.
 - Searches names, accounts, notes, and `#tags`.

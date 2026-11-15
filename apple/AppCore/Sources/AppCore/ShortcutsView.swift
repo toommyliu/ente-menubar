@@ -14,7 +14,7 @@ struct ShortcutsView: View {
       }
       section("From any app", global: true, layout)
       section("While Ente Auth is open", global: false, layout)
-      Text("Always available: ↑ ↓ choose a code, ↩ copies it, ⎋ clears or closes, hold ⌥ to show hidden codes, ⌘Q quits.")
+      Text("Always available: ↑ ↓ choose a code, ↩ copies it, ⌘C copies it and closes, ⎋ clears or closes, hold ⌥ to show hidden codes, ⌘Q quits.")
         .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
       Button("Restore Defaults") { model.restoreDefaultShortcuts() }
         .disabled(model.keymap.isDefault)

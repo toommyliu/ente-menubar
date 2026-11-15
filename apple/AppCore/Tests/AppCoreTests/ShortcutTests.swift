@@ -90,7 +90,7 @@ private struct Refused: Error {}
 
   @Test func problemMessagesNameTheKeysAndTheOwner() {
     #expect(ShortcutProblem.needsModifier.message(in: us) == "Shortcuts need ⌘, ⌥, or ⌃.")
-    #expect(ShortcutProblem.reserved(KeyCombo(.c, .command)).message(in: us) == "⌘C copies text in search.")
+    #expect(ShortcutProblem.reserved(KeyCombo(.c, .command)).message(in: us) == "⌘C copies the selected code and closes.")
     #expect(ShortcutProblem.reserved(KeyCombo(.q, .command)).message(in: us) == "⌘Q quits Ente Auth.")
     #expect(ShortcutProblem.taken(lock, by: .lock).message(in: us) == "⌘L is already used by Lock.")
     #expect(ShortcutProblem.unavailable(KeyCombo(k, [.control, .option])).message(in: us)

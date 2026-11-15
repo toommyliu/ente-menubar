@@ -75,6 +75,7 @@ struct AppModelTests {
     #expect(pasteboard.string(forType: .string) == "287082")
     #expect(model.copiedID == model.selectedID)
     model.showShortcuts()
+    #expect(model.copySelectedCode() == false)
     model.setRecording(.copyNextCode)
     #expect(model.handleKeyPress(KeyCombo(KeyCode(rawValue: 45), .command)) == true)
     model.closeShortcuts()
@@ -83,6 +84,8 @@ struct AppModelTests {
     #expect(model.handleKeyPress(KeyCombo(KeyCode(rawValue: 45), .command)) == true)
     #expect(pasteboard.string(forType: .string) == "359152")
     model.search = "sha256"
+    #expect(model.copySelectedCode() == true)
+    #expect(pasteboard.string(forType: .string) == "46119246")
     model.copy(moment: .next)
     #expect(pasteboard.string(forType: .string) == "30882438")
     model.search = "steam"
@@ -113,6 +116,7 @@ struct AppModelTests {
     #expect(await eventually { model.copiedID == nil })
     model.search = "no such issuer"
     #expect(model.filteredCodes.isEmpty)
+    #expect(model.copySelectedCode() == false)
     model.search = "alice"
     #expect(model.filteredCodes.count == 5)
     model.search = ""
