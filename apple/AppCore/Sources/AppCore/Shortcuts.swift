@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import SwiftUI
 
 public struct KeyCode: RawRepresentable, Hashable, Codable, Sendable {
   public let rawValue: UInt16
@@ -225,11 +226,25 @@ private let specialKeys: [KeyCode: (symbol: String, equivalent: String)] = {
   return keys
 }()
 
+extension KeyCombo {
+  func keyEquivalent(in layout: KeyLayout) -> String? {
+    specialKeys[key]?.equivalent ?? layout.character(key, modifiers.contains(.command))?.lowercased()
+  }
+
+  func keyboardShortcut(in layout: KeyLayout) -> KeyboardShortcut? {
+    guard let character = keyEquivalent(in: layout)?.first else { return nil }
+    var flags: SwiftUI.EventModifiers = []
+    if modifiers.contains(.control) { flags.insert(.control) }
+    if modifiers.contains(.option) { flags.insert(.option) }
+    if modifiers.contains(.shift) { flags.insert(.shift) }
+    if modifiers.contains(.command) { flags.insert(.command) }
+    return KeyboardShortcut(KeyEquivalent(character), modifiers: flags)
+  }
+}
+
 extension NSMenuItem {
   func setShortcut(_ combo: KeyCombo?, in layout: KeyLayout) {
-    keyEquivalent = combo.map {
-      specialKeys[$0.key]?.equivalent ?? layout.character($0.key, $0.modifiers.contains(.command))?.lowercased() ?? ""
-    } ?? ""
+    keyEquivalent = combo?.keyEquivalent(in: layout) ?? ""
     keyEquivalentModifierMask = combo?.modifiers.eventFlags ?? []
   }
 }

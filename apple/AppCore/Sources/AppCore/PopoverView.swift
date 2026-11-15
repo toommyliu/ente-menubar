@@ -245,6 +245,7 @@ struct VaultView: View {
     let rows = model.rows(for: state)
     let timing = CodeTiming.selected(in: rows, selection: model.selectedRowID)
     let count = state.codes.filter { !$0.display.trashed }.count
+    let nextShortcut = model.keymap.combo(for: .copyNextCode)?.keyboardShortcut(in: .current)
     VStack(spacing: 0) {
       HStack(spacing: 6) {
         Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
@@ -297,7 +298,7 @@ struct VaultView: View {
               }
             } else {
               ForEach(rows) { row in
-                discoveryRow(row).id(row.id)
+                discoveryRow(row, nextShortcut: nextShortcut).id(row.id)
               }
             }
           }
@@ -327,7 +328,7 @@ struct VaultView: View {
     })
   }
 
-  @ViewBuilder private func discoveryRow(_ row: DiscoveryRow) -> some View {
+  @ViewBuilder private func discoveryRow(_ row: DiscoveryRow, nextShortcut: KeyboardShortcut?) -> some View {
     switch row {
     case .header(let section, let note):
       HStack(spacing: 5) {
@@ -349,7 +350,7 @@ struct VaultView: View {
           searchFocused = true
         },
         hover: { model.select(row.id) }, hidden: model.codesHidden,
-        copyNext: { model.copy(id: code.id, moment: .next) },
+        copyNext: { model.copy(id: code.id, moment: .next) }, nextShortcut: nextShortcut,
         dismissSuggestion: section == .suggested ? { model.dismissSuggestion(id: code.id) } : nil)
     case .more(let count, let label):
       actionRow("\(count) more for \(label)", row: row)
@@ -440,6 +441,7 @@ struct CodeRow: View {
   let hover: () -> Void
   let hidden: Bool
   let copyNext: () -> Void
+  let nextShortcut: KeyboardShortcut?
   let dismissSuggestion: (() -> Void)?
 
   var body: some View {
@@ -488,8 +490,8 @@ struct CodeRow: View {
     .buttonStyle(.plain)
     .contextMenu {
       if code.kind != .hotp {
-        Button("Copy Code", action: copy)
-        Button("Copy Next Code", action: copyNext)
+        Button("Copy Code", action: copy).keyboardShortcut(.return, modifiers: [])
+        Button("Copy Next Code", action: copyNext).keyboardShortcut(nextShortcut)
       }
       if let dismissSuggestion {
         if code.kind != .hotp { Divider() }
